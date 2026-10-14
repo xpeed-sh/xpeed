@@ -371,6 +371,26 @@ fn output(session: &Session) -> String {
         .map(|c| c.cell.c)
         .collect()
 }
+fn wait_for_empty_prompt(app: &mut Xpeed, ctx: &egui::Context, id: u64) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        frame(app, ctx, vec![]);
+        let session = &app.sessions[&id];
+        let ready = session.term.lock().ok().is_some_and(|term| {
+            crate::terminal_view::command_editor(&term, session.size.cols)
+                .is_some_and(|editor| editor.text.is_empty())
+        });
+        if ready {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "shell did not reach an empty prompt: {}",
+            output(session)
+        );
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
 fn key(key: Key, modifiers: Modifiers) -> Event {
     Event::Key {
         key,
@@ -450,6 +470,7 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
         frame(&mut app, &ctx, vec![]);
     }
     let id = app.focused.unwrap();
+    wait_for_empty_prompt(&mut app, &ctx, id);
     let widget = app.sessions[&id].input_id.unwrap();
     ctx.memory_mut(|m| m.request_focus(widget));
     for arrow in [
@@ -464,10 +485,17 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
         frame(&mut app, &ctx, vec![]);
         assert_eq!(ctx.memory(|m| m.focused()), Some(widget));
     }
+    // Arrow navigation may recall the shell's own saved history. Cancel the
+    // recalled line before testing insertion, without executing that history.
+    app.sessions
+        .get_mut(&id)
+        .unwrap()
+        .send_user(b"\x03".to_vec());
+    wait_for_empty_prompt(&mut app, &ctx, id);
     let prefix = connection_key(&app.sources[&id]);
     app.history.push(
         format!("{prefix} :: previous-app-run"),
-        "echo XPEED_CLICK_COMMAND".into(),
+        "echo XPEED_CLICK_\"COMMAND\"".into(),
     );
     let mut pos = None;
     for _ in 0..3 {
@@ -480,7 +508,7 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
         );
         for shape in output.shapes {
             if let egui::Shape::Text(text) = shape.shape
-                && text.galley.text() == "echo XPEED_CLICK_COMMAND"
+                && text.galley.text() == "echo XPEED_CLICK_\"COMMAND\""
             {
                 pos = Some(text.pos + Vec2::new(12.0, 6.0));
             }
@@ -504,16 +532,28 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
     }
     assert_eq!(ctx.memory(|m| m.focused()), Some(widget));
     let deadline = Instant::now() + Duration::from_secs(10);
+    while !output(&app.sessions[&id]).contains("XPEED_CLICK_\"COMMAND\"")
+        && Instant::now() < deadline
+    {
+        frame(&mut app, &ctx, vec![]);
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(output(&app.sessions[&id]).contains("XPEED_CLICK_\"COMMAND\""));
+    // Bash/readline can redraw input more than once. Only executing this
+    // quoted command produces the joined marker, independent of echo count.
+    assert!(
+        !output(&app.sessions[&id]).contains("XPEED_CLICK_COMMAND"),
+        "click must insert text without pressing Enter"
+    );
+    frame(&mut app, &ctx, vec![key(Key::Enter, Modifiers::NONE)]);
     while !output(&app.sessions[&id]).contains("XPEED_CLICK_COMMAND") && Instant::now() < deadline {
         frame(&mut app, &ctx, vec![]);
         std::thread::sleep(Duration::from_millis(30));
     }
-    assert_eq!(
+    assert!(
+        output(&app.sessions[&id]).contains("XPEED_CLICK_COMMAND"),
+        "Enter must execute the inserted command: {}",
         output(&app.sessions[&id])
-            .matches("XPEED_CLICK_COMMAND")
-            .count(),
-        1,
-        "click must insert text without pressing Enter"
     );
     app.sessions
         .get_mut(&id)
@@ -557,16 +597,8 @@ fn nested_splits_route_the_keyboard_to_one_session_and_keep_local_panels_readabl
             session.size.rows
         );
     }
+    wait_for_empty_prompt(&mut app, &ctx, active);
     let deadline = Instant::now() + Duration::from_secs(20);
-    while (if cfg!(windows) {
-        !output(&app.sessions[&active]).contains('>')
-    } else {
-        output(&app.sessions[&active]).trim().is_empty()
-    }) && Instant::now() < deadline
-    {
-        frame(&mut app, &ctx, vec![]);
-        std::thread::sleep(Duration::from_millis(30));
-    }
     frame(
         &mut app,
         &ctx,

@@ -74,6 +74,9 @@ pub fn prompt_end(line: &str) -> Option<usize> {
                 || prefix.starts_with('~')
                 || prefix.starts_with('/')
                 || prefix.starts_with('[')
+                || prefix.strip_prefix("bash-").is_some_and(|version| {
+                    !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                })
             {
                 return Some(i + marker.len());
             }
@@ -166,6 +169,8 @@ mod tests {
             "C:\\Windows>dir",
             "root@host:~# ls",
             "$ pwd",
+            "bash-3.2$ ls",
+            "bash-5.2# pwd",
         ] {
             assert!(prompt_end(line).is_some(), "{line}");
         }
@@ -175,6 +180,7 @@ mod tests {
             "Enter passphrase for key: secret",
             "Proceed? yes",
             "some output",
+            "bash-password$ secret",
         ] {
             assert!(prompt_end(line).is_none(), "{line}");
         }
