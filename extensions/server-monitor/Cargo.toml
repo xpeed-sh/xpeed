@@ -1,0 +1,10 @@
+[package]
+name = "xpeed-server-monitor-extension"
+version = "0.1.2"
+edition = "2024"
+license = "MIT"
+description = "Optional read-only Linux server monitor for Xpeed"
+
+[dependencies]
+xpeed-i18n = { path = "../../crates/xpeed-i18n" }
+serde_json = "1"

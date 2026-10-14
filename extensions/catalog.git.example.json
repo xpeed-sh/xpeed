@@ -1,0 +1,14 @@
+[
+  {
+    "id": "xpeed.codex",
+    "repository": "https://github.com/xpeed-sh/extension-codex",
+    "reference": "main",
+    "requirements": "Codex CLI o la extensión oficial de Codex instalada en VS Code."
+  },
+  {
+    "id": "xpeed.server-monitor",
+    "repository": "https://github.com/xpeed-sh/extension-server-monitor",
+    "reference": "main",
+    "requirements": "Servidor Linux y una sesión SSH autenticada en Xpeed."
+  }
+]

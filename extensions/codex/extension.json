@@ -1,0 +1,45 @@
+{
+  "id": "xpeed.codex",
+  "name": "Codex",
+  "version": "0.3.1",
+  "protocolVersion": 1,
+  "publisher": "Xpeed",
+  "description": "Codex with ChatGPT sign-in and tools for explicitly selected local and SSH sessions.",
+  "license": "MIT",
+  "entrypoints": {
+    "windows": "bin/xpeed-codex-extension.exe",
+    "linux": "bin/xpeed-codex-extension",
+    "macos": "bin/xpeed-codex-extension"
+  },
+  "capabilities": [
+    "chat",
+    "login",
+    "models",
+    "approvals",
+    "localization",
+    "sessionTools"
+  ],
+  "permissions": [
+    "Start the local Codex process",
+    "Connect to the provider using the Codex account",
+    "sessions.tools"
+  ],
+  "localizations": {
+    "en": {
+      "name": "Codex",
+      "description": "Codex with ChatGPT sign-in and tools for explicitly selected local and SSH sessions.",
+      "readme": "README.md"
+    },
+    "es": {
+      "name": "Codex",
+      "description": "Codex con cuenta de ChatGPT y herramientas para sesiones locales y SSH seleccionadas.",
+      "readme": "README.es.md",
+      "permissions": [
+        "Iniciar el proceso local de Codex",
+        "Conectar al proveedor con la cuenta de Codex",
+        "sessions.tools"
+      ],
+      "views": {}
+    }
+  }
+}

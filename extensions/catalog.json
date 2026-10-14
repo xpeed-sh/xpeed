@@ -1,0 +1,16 @@
+[
+  {
+    "id": "xpeed.codex",
+    "name": "Codex",
+    "description": "ChatGPT sign-in and tools for explicitly selected local and SSH sessions.",
+    "path": "packages/xpeed.codex",
+    "requirements": "XPEED 0.8.0+ and local Codex CLI 0.162.0-alpha.2. SSH tools require sh, timeout and OpenSSH SFTP."
+  },
+  {
+    "id": "xpeed.server-monitor",
+    "name": "Monitor del servidor",
+    "description": "Gráficos de CPU, RAM, disco, red y procesos de la pestaña SSH activa.",
+    "path": "packages/xpeed.server-monitor",
+    "requirements": "Xpeed 0.6.15+, servidor Linux con /proc, sh, cat, df y getconf. Usa el acceso SSH de la sesión seleccionada."
+  }
+]

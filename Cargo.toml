@@ -1,0 +1,49 @@
+[package]
+name = "xpeed"
+version = "0.10.6"
+edition = "2024"
+description = "A fast, focused terminal workspace"
+license = "MIT"
+
+[dependencies]
+xpeed-i18n = { path = "crates/xpeed-i18n" }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+alacritty_terminal = "0.26"
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+png = "0.18"
+egui_tiles = { version = "0.14.1", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+zeroize = "1"
+rand = "0.9"
+egui_commonmark = { version = "0.22", default-features = false }
+egui_extras = { version = "0.33", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false }
+chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }
+raw-window-handle = "0.6"
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust", "vendored"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+
+[workspace]
+members = ["extensions/codex", "extensions/server-monitor", "crates/xpeed-i18n"]
+default-members = ["."]
+resolver = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

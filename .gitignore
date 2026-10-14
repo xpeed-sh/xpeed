@@ -1,0 +1,23 @@
+﻿/target/
+/.tools/
+/artifacts/
+/dist/
+/extensions/packages/
+
+# Configuración local y secretos
+.env
+.env.*
+!.env.example
+
+# Archivos temporales y herramientas de edición
+*.log
+*.tmp
+*.bak
+*.swp
+__pycache__/
+.DS_Store
+Thumbs.db
+/.vs/
+/.idea/
+
+xpeed.md

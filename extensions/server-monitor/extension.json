@@ -1,0 +1,46 @@
+{
+  "id": "xpeed.server-monitor",
+  "name": "Server monitor",
+  "version": "0.1.2",
+  "protocolVersion": 1,
+  "publisher": "Xpeed",
+  "description": "CPU, RAM, disk, network and processes for the active SSH tab, with live charts.",
+  "license": "MIT",
+  "entrypoints": {
+    "windows": "bin/xpeed-server-monitor-extension.exe",
+    "linux": "bin/xpeed-server-monitor-extension",
+    "macos": "bin/xpeed-server-monitor-extension"
+  },
+  "capabilities": [
+    "serverMetrics",
+    "localization"
+  ],
+  "permissions": [
+    "Read server metrics"
+  ],
+  "views": [
+    {
+      "id": "monitor",
+      "title": "Monitor",
+      "location": "server"
+    }
+  ],
+  "localizations": {
+    "en": {
+      "name": "Server monitor",
+      "description": "CPU, RAM, disk, network and processes for the active SSH tab, with live charts.",
+      "readme": "README.md"
+    },
+    "es": {
+      "name": "Monitor del servidor",
+      "description": "CPU, RAM, disco, red y procesos de la pestaña SSH activa, con gráficos en tiempo real.",
+      "readme": "README.es.md",
+      "permissions": [
+        "server.metrics.read"
+      ],
+      "views": {
+        "monitor": "Monitor"
+      }
+    }
+  }
+}

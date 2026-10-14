@@ -1,0 +1,22 @@
+[package]
+name = "xpeed-codex-extension"
+version = "0.3.1"
+edition = "2024"
+license = "MIT"
+description = "Optional Codex app-server adapter for Xpeed"
+[dependencies]
+xpeed-i18n = { path = "../../crates/xpeed-i18n" }
+serde_json = "1"
+
+[features]
+test-provider = []
+
+[[bin]]
+name = "xpeed-codex-extension"
+path = "src/main.rs"
+
+[[bin]]
+name = "mock-codex"
+path = "fixtures/mock_provider.rs"
+required-features = ["test-provider"]
+
