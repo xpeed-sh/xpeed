@@ -132,6 +132,25 @@ pub struct Session {
 }
 
 impl Session {
+    #[cfg(test)]
+    pub fn spawn_isolated_test_shell(id: u64, cwd: PathBuf, ctx: egui::Context) -> Self {
+        let mut command = if cfg!(windows) {
+            let mut command = CommandBuilder::new("powershell.exe");
+            command.args(["-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                "Import-Module PSReadLine; Set-PSReadLineOption -HistorySaveStyle SaveNothing; [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory(); function global:prompt { 'PS XPEED_TEST> ' }"]);
+            command
+        } else {
+            let mut command = CommandBuilder::new("/bin/bash");
+            command.args(["--noprofile", "--norc", "-i"]);
+            command.env("PS1", "XPEED_TEST:workspace runner$ ");
+            command.env("HISTFILE", "/dev/null");
+            command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
+            command
+        };
+        command.env("TERM", "xterm-256color");
+        Self::spawn_command(id, Profile::default_shell(), cwd, ctx, command, None).unwrap()
+    }
+
     pub fn spawn(
         id: u64,
         shell: Profile,

@@ -323,17 +323,14 @@ pub(crate) fn command_editor<T: alacritty_terminal::event::EventListener>(
 ) -> Option<crate::history::Editor> {
     let cursor = term.grid().cursor.point;
     for row in (0..=cursor.line.0).rev().take(8) {
-        let text: String = (0..cols)
-            .map(|col| term.grid()[Point::new(Line(row), Column(col))].c)
+        let text: String = (row..=cursor.line.0)
+            .flat_map(|line| {
+                (0..cols).map(move |col| term.grid()[Point::new(Line(line), Column(col))].c)
+            })
             .collect();
         if let Some(end) = crate::history::prompt_end(&text) {
             let prefix = text[..end].chars().count();
-            let mut command: String = text[end..].to_string();
-            for next in row + 1..=cursor.line.0 {
-                command.extend(
-                    (0..cols).map(|col| term.grid()[Point::new(Line(next), Column(col))].c),
-                );
-            }
+            let command: String = text[end..].to_string();
             let text: Vec<char> = command.trim_end().chars().collect();
             let position = ((cursor.line.0 - row) as usize * cols + cursor.column.0)
                 .saturating_sub(prefix)
@@ -377,6 +374,25 @@ fn search_columns(text: &str, needle: &str) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn macos_prompt_is_recognized_when_hostname_wraps_across_rows() {
+        struct Listener;
+        impl alacritty_terminal::event::EventListener for Listener {
+            fn send_event(&self, _: alacritty_terminal::event::Event) {}
+        }
+        for cols in [32, 80, 120] {
+            let mut term = alacritty_terminal::term::Term::new(
+                alacritty_terminal::term::Config::default(),
+                &Size { cols, rows: 24 },
+                Listener,
+            );
+            let mut parser: alacritty_terminal::vte::ansi::Processor = Default::default();
+            parser.advance(&mut term, b"iad11-ei415-fe68b8d1-3463-469c-99dd-9c62d1a2c44b-BA495D41329B:xpeed runner$ echo hello");
+            let editor = command_editor(&term, cols).expect("wrapped macOS prompt");
+            assert_eq!(editor.text.iter().collect::<String>(), "echo hello");
+            assert_eq!(editor.cursor, "echo hello".len());
+        }
+    }
     #[test]
     fn command_capture_does_not_reuse_a_prompt_before_a_password_question() {
         struct Listener;

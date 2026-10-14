@@ -391,6 +391,15 @@ fn wait_for_empty_prompt(app: &mut Xpeed, ctx: &egui::Context, id: u64) {
         std::thread::sleep(Duration::from_millis(30));
     }
 }
+fn isolate_test_shells(app: &mut Xpeed, ctx: &egui::Context) {
+    let ids: Vec<_> = app.sessions.keys().copied().collect();
+    for id in ids {
+        app.sessions.insert(
+            id,
+            Session::spawn_isolated_test_shell(id, app.cwd.clone(), ctx.clone()),
+        );
+    }
+}
 fn key(key: Key, modifiers: Modifiers) -> Event {
     Event::Key {
         key,
@@ -466,6 +475,7 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
     let ctx = egui::Context::default();
     let mut app = Xpeed::from_context(&ctx, true);
     app.action(Action::Local(Profile::default_shell()), &ctx);
+    isolate_test_shells(&mut app, &ctx);
     for _ in 0..3 {
         frame(&mut app, &ctx, vec![]);
     }
@@ -485,13 +495,6 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
         frame(&mut app, &ctx, vec![]);
         assert_eq!(ctx.memory(|m| m.focused()), Some(widget));
     }
-    // Arrow navigation may recall the shell's own saved history. Cancel the
-    // recalled line before testing insertion, without executing that history.
-    app.sessions
-        .get_mut(&id)
-        .unwrap()
-        .send_user(b"\x03".to_vec());
-    wait_for_empty_prompt(&mut app, &ctx, id);
     let prefix = connection_key(&app.sources[&id]);
     app.history.push(
         format!("{prefix} :: previous-app-run"),
@@ -538,7 +541,11 @@ fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_ins
         frame(&mut app, &ctx, vec![]);
         std::thread::sleep(Duration::from_millis(30));
     }
-    assert!(output(&app.sessions[&id]).contains("XPEED_CLICK_\"COMMAND\""));
+    assert!(
+        output(&app.sessions[&id]).contains("XPEED_CLICK_\"COMMAND\""),
+        "inserted command was not visible: {}",
+        output(&app.sessions[&id])
+    );
     // Bash/readline can redraw input more than once. Only executing this
     // quoted command produces the joined marker, independent of echo count.
     assert!(
@@ -578,6 +585,7 @@ fn nested_splits_route_the_keyboard_to_one_session_and_keep_local_panels_readabl
     app.action(Action::Local(Profile::default_shell()), &ctx);
     app.split(ContainerKind::Horizontal, &ctx);
     app.split(ContainerKind::Vertical, &ctx);
+    isolate_test_shells(&mut app, &ctx);
     for _ in 0..3 {
         frame(&mut app, &ctx, vec![]);
     }

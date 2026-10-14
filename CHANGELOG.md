@@ -1,16 +1,13 @@
 # Changelog
 
-## Sin publicar
-
-- Historial reconoce el prompt estándar bash-3.2 de macOS. Las pruebas de terminal esperan un prompt listo y distinguen el eco del comando de su ejecución.
-
-- CI: el runner Windows prepara MSVC y el SDK antes de compilar el icono; Linux/macOS derivan Default para WindowSize, conservando la inicialización del reloj en Windows.
-
-- README principal reducido a presentación, funciones y enlaces. Guías técnicas organizadas en docs/.
-- Codex y Monitor tienen VERSION y CHANGELOG independientes, incluidos en sus proyectos exportados y paquetes.
-
 ## 0.10.7 - 2026-10-14
 
+- Historial reconoce también el prompt macOS equipo:carpeta usuario$, incluso con el nombre del equipo dividido en varias filas. Pruebas de foco/pegado usan shells e historial aislados y evitan una carrera entre Ctrl+C y la inserción.
+
+- Historial reconoce el prompt estándar bash-3.2 de macOS. Las pruebas de terminal esperan un prompt listo y distinguen el eco del comando de su ejecución.
+- CI: el runner Windows prepara MSVC y el SDK antes de compilar el icono; Linux/macOS derivan Default para WindowSize, conservando la inicialización del reloj en Windows.
+- README principal reducido a presentación, funciones y enlaces. Guías técnicas organizadas en docs/.
+- Codex y Monitor tienen VERSION y CHANGELOG independientes, incluidos en sus proyectos exportados y paquetes.
 - Guías de desarrollo, idiomas, distribución y actualizaciones movidas a docs/. Se retira GIT-PUBLISHING.md.
 - Ajustes incluye Actualizaciones: consulta manual de la versión estable publicada en xpeed-sh/xpeed y enlace al instalador Windows oficial. La instalación se realiza manualmente, sin recompilar ni cerrar sesiones automáticamente.
 

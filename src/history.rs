@@ -77,12 +77,32 @@ pub fn prompt_end(line: &str) -> Option<usize> {
                 || prefix.strip_prefix("bash-").is_some_and(|version| {
                     !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit() || b == b'.')
                 })
+                || macos_prompt(prefix)
             {
                 return Some(i + marker.len());
             }
         }
     }
     None
+}
+
+fn macos_prompt(prefix: &str) -> bool {
+    // macOS Bash's default PS1: hostname:directory username$ (or #).
+    let Some((host, rest)) = prefix.split_once(':') else {
+        return false;
+    };
+    let Some((directory, user)) = rest.rsplit_once(' ') else {
+        return false;
+    };
+    !host.is_empty()
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'))
+        && !directory.trim().is_empty()
+        && !user.is_empty()
+        && user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 pub struct Editor {
     pub text: Vec<char>,
@@ -171,6 +191,9 @@ mod tests {
             "$ pwd",
             "bash-3.2$ ls",
             "bash-5.2# pwd",
+            "MacBook-Pro:xpeed runner$ ls",
+            "iad11-ei415-fe68b8d1:xpeed runner$ pwd",
+            "MacBook:folder with spaces root# whoami",
         ] {
             assert!(prompt_end(line).is_some(), "{line}");
         }
@@ -181,6 +204,8 @@ mod tests {
             "Proceed? yes",
             "some output",
             "bash-password$ secret",
+            "Password: secret$ ",
+            "Enter passphrase: key secret$ ",
         ] {
             assert!(prompt_end(line).is_none(), "{line}");
         }
