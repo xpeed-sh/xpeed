@@ -4,7 +4,7 @@ Xpeed es una aplicación nativa en Rust, actualmente en desarrollo. Las comproba
 
 ## Preparar el entorno
 
-Necesitas Rust estable y las herramientas de compilación del sistema. En Windows puedes usar Visual Studio Build Tools con MSVC o un entorno GNU compatible. En Ubuntu y macOS consulta las dependencias indicadas en [Desarrollo](DEVELOPMENT.md).
+Necesitas Rust estable y las herramientas de compilación del sistema. En Windows puedes usar Visual Studio Build Tools con MSVC o un entorno GNU compatible. En Ubuntu y macOS consulta las dependencias indicadas en [Desarrollo](docs/DEVELOPMENT.md).
 
 ```sh
 cargo run
@@ -29,7 +29,7 @@ cargo test --workspace --locked
 cargo build --locked --release
 ```
 
-Para cambios visuales, revisa la aplicación o las capturas nativas descritas en DEVELOPMENT.md. Para cambios de terminal o autenticación, comprueba también el comportamiento real con procesos y servidores de prueba locales. Nunca incluyas contraseñas, claves privadas ni datos de servidores personales en pruebas o capturas.
+Para cambios visuales, revisa la aplicación o las capturas nativas descritas en docs/DEVELOPMENT.md. Para cambios de terminal o autenticación, comprueba también el comportamiento real con procesos y servidores de prueba locales. Nunca incluyas contraseñas, claves privadas ni datos de servidores personales en pruebas o capturas.
 
 Para comprobar el tamaño de ventana en los monitores conectados a Windows, con Python instalado y la aplicación compilada:
 
@@ -65,4 +65,4 @@ El código de Xpeed utiliza la [licencia MIT](LICENSE). Las dependencias conserv
 
 ## Extensiones y publicación
 
-Cada adaptador mantiene su propio VERSION, CHANGELOG y manifiesto. La preparación de los repositorios independientes se explica en [GIT-PUBLISHING.md](GIT-PUBLISHING.md).
+Cada adaptador mantiene su propio VERSION, CHANGELOG y manifiesto. Los proyectos independientes se preparan con `scripts/prepare-git-repositories.ps1`; consulta [el contrato de extensiones](docs/EXTENSIONS.md).

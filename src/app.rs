@@ -134,6 +134,7 @@ pub struct Xpeed {
     sessions: BTreeMap<u64, Session>,
     reconnects: BTreeMap<u64, (u32, Instant)>,
     productivity: crate::productivity::State,
+    updates: crate::updates::Updates,
     sources: BTreeMap<u64, Connection>,
     focused: Option<u64>,
     next_id: u64,
@@ -410,6 +411,7 @@ impl Xpeed {
             sessions: BTreeMap::new(),
             reconnects: BTreeMap::new(),
             productivity: Default::default(),
+            updates: Default::default(),
             sources: BTreeMap::new(),
             focused: None,
             next_id: 1,
@@ -2131,6 +2133,9 @@ impl Xpeed {
                             if ui.button(xpeed_i18n::t("Export / import configuration")).clicked() { self.productivity.backup_open = true; }
                         });
                         self.extension_sections(ui, crate::extensions::ViewLocation::Settings);
+                        egui::CollapsingHeader::new(xpeed_i18n::t("Updates")).id_salt("settings_updates").show(ui, |ui| {
+                            self.updates.ui(ui);
+                        });
                         ui.add_space(12.0);
                         ui.add(egui::Label::new(RichText::new(xpeed_i18n::t("Los ajustes se guardan automáticamente en este equipo.")).size(11.0).color(p.dim)).wrap());
                     });

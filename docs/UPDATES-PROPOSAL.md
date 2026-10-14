@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-Xpeed 0.10.6 **no tiene un actualizador de la aplicación**, ni un botón para buscar versiones del sistema. Las actualizaciones desde Git implementadas en el gestor corresponden a las extensiones.
+Xpeed 0.10.7 incluye **Ajustes → Actualizaciones**, con consulta manual de la Release estable de `xpeed-sh/xpeed`, versión disponible, notas y descarga del instalador Windows. La descarga se abre en el navegador; el usuario ejecuta el instalador y cierra Xpeed cuando esté listo. No hay instalación automática ni recompilación. El gestor de extensiones mantiene sus actualizaciones independientes.
 
 Subir commits o etiquetas a `xpeed-sh/xpeed` no actualiza los equipos de los usuarios: necesitan una distribución compilada.
 
@@ -10,7 +10,7 @@ Subir commits o etiquetas a `xpeed-sh/xpeed` no actualiza los equipos de los usu
 
 Cada versión tendrá una etiqueta `vX.Y.Z` y una Release con instalador Windows `Xpeed-Setup-X.Y.Z-x64.exe`, sumas SHA-256 y notas del CHANGELOG. La web puede enlazar a esas mismas descargas. Linux/macOS se añadirán cuando sus paquetes estén validados.
 
-## Flujo pendiente de implementar
+## Flujo completo previsto
 
 1. **Ajustes → Actualizaciones**: versión instalada y **Buscar actualizaciones**, con acceso también desde Información.
 2. Consultar las releases en segundo plano y comparar versiones estables. Mostrar cambios, errores de red y **Descargar actualización**.
@@ -26,4 +26,6 @@ Un flujo de compilación podrá generar instalador y sumas desde una etiqueta y 
 
 Cada extensión se actualiza desde su propio repositorio y mantiene su versión. Actualizar Xpeed no debe reinstalar las extensiones ni reemplazar las preferencias del usuario. Los instaladores anteriores pueden conservarse para volver atrás, revisando antes la compatibilidad de las migraciones de datos.
 
-Esta es una propuesta documentada: todavía no se ha implementado el panel ni el actualizador, ni publicado una Release desde esta tarea.
+El panel de consulta y el enlace de descarga ya están implementados. La descarga interna, verificación de suma, instalación y reinicio coordinados quedan pendientes. No se ha publicado una Release desde esta tarea.
+
+Para que el botón encuentre la entrega, crea una Release estable con etiqueta `vX.Y.Z` y adjunta exactamente `Xpeed-Setup-X.Y.Z-x64.exe`. Un commit o una etiqueta sin Release no bastan. [Contrato de la API de Releases](https://docs.github.com/en/rest/releases/releases#get-the-latest-release).

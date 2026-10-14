@@ -7,7 +7,7 @@
 | Codex | 0.3.1 | [README](../extensions/codex/README.es.md) | [CHANGELOG](../extensions/codex/CHANGELOG.md) |
 | Monitor del servidor | 0.1.2 | [README](../extensions/server-monitor/README.es.md) | [CHANGELOG](../extensions/server-monitor/CHANGELOG.md) |
 
-Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados. El script de exportación comprueba esos números e incluye su changelog. La guía [GIT-PUBLISHING.md](../GIT-PUBLISHING.md) explica qué carpeta publicar en cada repositorio. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
+Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados. El script de exportación comprueba esos números e incluye su changelog. Publica cada proyecto generado en `dist/git-repositories/` en su repositorio independiente. La carpeta fuente `extensions/` sigue perteneciendo al workspace de Xpeed; `extensions/packages/` contiene paquetes generados excluidos de Git. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
 
 Las secciones con números de versión describen la evolución del contrato. Actualmente cada extensión de chat tiene su propio panel; no existe un contenedor IA compartido. Las extensiones se abren desde el gestor o el menú Extensiones.
 
@@ -21,7 +21,7 @@ El adaptador recibe ese ámbito en `chat/start.params.scope`. Envía solicitudes
 
 Herramientas: `xpeed_list_sessions`, `xpeed_exec`, `xpeed_read_terminal`, `xpeed_task_status`, `xpeed_cancel_task`, `xpeed_read_file`, `xpeed_list_directory`, `xpeed_propose_change`, `xpeed_apply_change`. Las tareas incluyen estado, `sessionId`, `taskId`, stdout/stderr, `exitCode` y `outputTruncated`. Las propuestas pertenecen al host, se revisan como diferencias y se aplican por ID. Cada adaptador traduce su protocolo; el núcleo no implementa el de Codex.
 
-Desde **0.7.1**, la interfaz inicia en inglés; cambia a español en **Settings → Language**. Codex 0.1.1 y Monitor 0.1.2 siguen ese ajuste, incluso conectados. Cada extensión puede declarar metadatos y documentación por idioma en `localizations`; consulta [LOCALIZATION.md](../LOCALIZATION.md) para integrar más idiomas y el protocolo de actualización.
+Desde **0.7.1**, la interfaz inicia en inglés; cambia a español en **Settings → Language**. Codex 0.1.1 y Monitor 0.1.2 siguen ese ajuste, incluso conectados. Cada extensión puede declarar metadatos y documentación por idioma en `localizations`; consulta [LOCALIZATION.md](LOCALIZATION.md) para integrar más idiomas y el protocolo de actualización.
 
 En **Xpeed 0.7.0**, el gestor divide la columna en **Instaladas** y **Catálogo**, con búsqueda, scroll independiente y un separador ajustable. Selecciona una extensión para abrir su ficha como pestaña central: allí puedes instalarla, activarla, abrir su panel, configurar el proveedor y desinstalarla. El menú **Git** conecta repositorios y catálogos; también conserva la instalación desde una carpeta local.
 

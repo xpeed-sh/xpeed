@@ -2,7 +2,7 @@
 
 ## Instalador: compartir un solo .exe
 
-Comparte `dist/installer/Xpeed-Setup-0.10.6-x64.exe`. Instala Xpeed y sus paquetes opcionales en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye desinstalador, interfaz en inglés y español, documentación y licencias. No solicita permisos de administrador.
+Comparte `dist/installer/Xpeed-Setup-0.10.7-x64.exe`. Instala Xpeed y sus paquetes opcionales en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye desinstalador, interfaz en inglés y español, documentación y licencias. No solicita permisos de administrador.
 
 Para generar el instalador instala [Inno Setup 6](https://jrsoftware.org/isdl.php) en el equipo de desarrollo y ejecuta:
 
@@ -14,7 +14,7 @@ Si ya preparaste la carpeta portátil, usa `.\scripts\package-installer.ps1 -Ski
 
 Las actualizaciones usan la misma identidad de instalación. El desinstalador conserva las cuentas, conexiones y chats en `%APPDATA%\xpeed`. Los runtimes de proveedores, como Codex, siguen siendo requisitos opcionales independientes.
 
-La entrega actual está en `dist/Xpeed-0.10.6.exe`. La carpeta `dist/portable/Xpeed-0.10.6` reúne `Xpeed.exe`, documentación, licencias y los paquetes opcionales disponibles: puedes compartirla directamente. Es una aplicación portátil para Windows x64: no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
+La entrega actual está en `dist/Xpeed-0.10.7.exe`. La carpeta `dist/portable/Xpeed-0.10.7` reúne `Xpeed.exe`, documentación, licencias y los paquetes opcionales disponibles: puedes compartirla directamente. Es una aplicación portátil para Windows x64: no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
 
 ## Generar otra entrega
 
@@ -40,7 +40,7 @@ En este equipo, los scripts detectan Rust en `.tools` y MinGW en `C:\msys64\ming
 
 ## Qué compartir
 
-- `Xpeed-0.10.6.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
+- `Xpeed-0.10.7.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
 - Si quieres distribuir las extensiones locales, incluye `extensions/catalog.json` y `extensions/packages` manteniendo esa estructura junto al ejecutable. La app principal funciona sin Codex instalado.
 - Para la distribución por Git, publica `dist/git-repositories/xpeed.codex` como un repositorio de extensión y conecta su enlace desde Extensiones → Git. El usuario instala y abre Codex desde allí.
 
@@ -49,3 +49,7 @@ Cada persona inicia sesión en su propia cuenta de ChatGPT. Codex necesita un ru
 Los datos personales se crean en `%APPDATA%\xpeed` en cada equipo. Comparte los archivos de distribución, sin copiar esa carpeta personal ni credenciales, `.tools` o `target`.
 
 También se conserva la entrega portátil. El instalador no tiene firma Authenticode. Las pruebas locales se realizaron en Windows; todavía falta comprobarla en un equipo limpio antes de una publicación general.
+
+## Actualizar una instalación
+
+Desde Xpeed 0.10.7, Ajustes → Actualizaciones consulta las Releases estables de `xpeed-sh/xpeed`. Para ofrecer la descarga, adjunta a la Release el instalador con nombre `Xpeed-Setup-X.Y.Z-x64.exe` y usa una etiqueta `vX.Y.Z`. El usuario descarga desde su navegador y ejecuta el instalador cuando esté listo para cerrar las sesiones. No necesita Rust, Git ni recompilar la aplicación. La descarga/instalación automáticas quedan pendientes.

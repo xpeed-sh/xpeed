@@ -2,8 +2,13 @@
 
 ## Sin publicar
 
-- README principal reducido a presentación, funciones y enlaces. Referencia técnica en DEVELOPMENT.md y preparación de repositorios en GIT-PUBLISHING.md.
+- README principal reducido a presentación, funciones y enlaces. Guías técnicas organizadas en docs/.
 - Codex y Monitor tienen VERSION y CHANGELOG independientes, incluidos en sus proyectos exportados y paquetes.
+
+## 0.10.7 - 2026-10-14
+
+- Guías de desarrollo, idiomas, distribución y actualizaciones movidas a docs/. Se retira GIT-PUBLISHING.md.
+- Ajustes incluye Actualizaciones: consulta manual de la versión estable publicada en xpeed-sh/xpeed y enlace al instalador Windows oficial. La instalación se realiza manualmente, sin recompilar ni cerrar sesiones automáticamente.
 
 ## 0.10.6 - 2026-10-10
 

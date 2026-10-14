@@ -31,12 +31,12 @@ try {
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $distribution -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $distribution -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY.md') -Destination $distribution -Force
-foreach ($document in @('CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md', 'LOCALIZATION.md', 'DISTRIBUTION.md', 'DEVELOPMENT.md', 'GIT-PUBLISHING.md')) {
+foreach ($document in @('CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $document) -Destination $distribution -Force
 }
 $technicalDocs = Join-Path $distribution 'docs'
 New-Item -ItemType Directory -Force -Path $technicalDocs | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/EXTENSIONS.md') -Destination $technicalDocs -Force
+Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs') -File -Filter '*.md' | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $technicalDocs -Force }
 $catalogDirectory = Join-Path $distribution 'extensions'
 New-Item -ItemType Directory -Force -Path $catalogDirectory | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions\catalog.json') -Destination $catalogDirectory -Force
@@ -85,7 +85,7 @@ $dependencyList | Set-Content -LiteralPath (Join-Path $distribution 'DEPENDENCIE
 $portableDirectory = Join-Path $distribution "portable\Xpeed-$appVersion"
 New-Item -ItemType Directory -Force -Path $portableDirectory | Out-Null
 Copy-Item -LiteralPath (Join-Path $distribution "Xpeed-$appVersion.exe") -Destination (Join-Path $portableDirectory 'Xpeed.exe') -Force
-foreach ($document in @('LICENSE', 'THIRD_PARTY.md', 'DEPENDENCIES.txt', 'README.md', 'CHANGELOG.md', 'VERSION', 'CREDITS.md', 'DISTRIBUTION.md', 'LOCALIZATION.md', 'CONTRIBUTING.md', 'DEVELOPMENT.md', 'GIT-PUBLISHING.md')) {
+foreach ($document in @('LICENSE', 'THIRD_PARTY.md', 'DEPENDENCIES.txt', 'README.md', 'CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md')) {
     Copy-Item -LiteralPath (Join-Path $distribution $document) -Destination $portableDirectory -Force
 }
 foreach ($folder in @('licenses', 'extensions', 'assets', 'docs')) {

@@ -18,6 +18,7 @@ mod svg_icons;
 mod terminal;
 mod terminal_agent;
 mod terminal_view;
+mod updates;
 mod window_size;
 mod workspace;
 fn main() -> eframe::Result {

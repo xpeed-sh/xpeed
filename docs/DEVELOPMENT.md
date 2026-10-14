@@ -33,7 +33,7 @@ Haz clic en una terminal para dirigir allí el teclado. Cerrar una terminal term
 
 En este equipo Rust está instalado en `.tools`, sin modificar el PATH del usuario. Los scripts detectan esa instalación y las herramientas GNU en `C:\msys64\mingw64\bin`. En otro equipo se necesita Rust y un compilador compatible; MSVC con Visual Studio Build Tools también es válido.
 
-El icono de Windows se compila con `windres` (GNU) o `rc.exe` del Windows SDK (MSVC), disponibles en el PATH. La imagen y los iconos derivados están en [`assets/img`](assets/img/README.md); no se requiere Python para compilar.
+El icono de Windows se compila con `windres` (GNU) o `rc.exe` del Windows SDK (MSVC), disponibles en el PATH. La imagen y los iconos derivados están en [`assets/img`](../assets/img/README.md); no se requiere Python para compilar.
 
 En Linux/macOS:
 
@@ -74,4 +74,4 @@ Los controles y el árbol usan vectores dibujados por la interfaz en `src/app.rs
 
 ## Contrato de extensiones
 
-Consulta [docs/EXTENSIONS.md](docs/EXTENSIONS.md) para desarrollar adaptadores y contribuciones de paneles. El uso de cada extensión se documenta en su propio proyecto.
+Consulta [docs/EXTENSIONS.md](EXTENSIONS.md) para desarrollar adaptadores y contribuciones de paneles. El uso de cada extensión se documenta en su propio proyecto.
