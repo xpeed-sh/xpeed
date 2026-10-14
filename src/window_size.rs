@@ -18,6 +18,7 @@ struct Snapshot {
     minimized: bool,
     moving: bool,
 }
+#[cfg_attr(not(windows), derive(Default))]
 pub struct WindowSize {
     restored: Option<Vec2>,
     previous_monitor: Option<(usize, Bounds, f32)>,
@@ -27,6 +28,7 @@ pub struct WindowSize {
     #[cfg(windows)]
     created: std::time::Instant,
 }
+#[cfg(windows)]
 impl Default for WindowSize {
     fn default() -> Self {
         Self {

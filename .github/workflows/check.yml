@@ -10,6 +10,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Configure Windows compiler and SDK
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Verify Windows resource compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Get-Command rc.exe -ErrorAction Stop
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

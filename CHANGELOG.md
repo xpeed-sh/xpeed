@@ -2,6 +2,8 @@
 
 ## Sin publicar
 
+- CI: el runner Windows prepara MSVC y el SDK antes de compilar el icono; Linux/macOS derivan Default para WindowSize, conservando la inicialización del reloj en Windows.
+
 - README principal reducido a presentación, funciones y enlaces. Guías técnicas organizadas en docs/.
 - Codex y Monitor tienen VERSION y CHANGELOG independientes, incluidos en sus proyectos exportados y paquetes.
 
