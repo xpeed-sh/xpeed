@@ -63,7 +63,7 @@ pub fn default_layout(terminals: &[u64], sidebar_right: bool) -> Tree<Pane> {
     let root = tiles.insert_container(Linear::new_binary(
         LinearDir::Horizontal,
         [root, ai_tabs],
-        0.77,
+        0.724,
     ));
     let mut tree = Tree::new("xpeed_workspace", root, tiles);
     tree.set_visible(files, false);
@@ -387,6 +387,41 @@ pub struct Snapshot {
     #[serde(default)]
     pub sidebar_tree: Option<Tree<Pane>>,
 }
+
+fn widen_right_column(tree: &mut Tree<Pane>) {
+    let Some(root) = tree.root else {
+        return;
+    };
+    let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root) else {
+        return;
+    };
+    if linear.dir != LinearDir::Horizontal || linear.children.len() != 2 {
+        return;
+    }
+    let [left, right] = [linear.children[0], linear.children[1]];
+    let mut pending = vec![right];
+    let mut contains_info = false;
+    while let Some(id) = pending.pop() {
+        match tree.tiles.get(id) {
+            Some(Tile::Pane(Pane::AppInfo)) => contains_info = true,
+            Some(Tile::Pane(Pane::Terminal(_) | Pane::Welcome)) => return,
+            Some(Tile::Container(container)) => pending.extend(container.children().copied()),
+            _ => {}
+        }
+    }
+    if !contains_info {
+        return;
+    }
+    let total = linear.shares[left] + linear.shares[right];
+    if !total.is_finite() || total <= 0.0 {
+        return;
+    }
+    let ratio = (linear.shares[right] / total * 1.2).clamp(0.1, 0.6);
+    if let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get_mut(root) {
+        linear.shares.set_share(left, total * (1.0 - ratio));
+        linear.shares.set_share(right, total * ratio);
+    }
+}
 impl Snapshot {
     fn path() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("xpeed").join("workspace.json"))
@@ -425,6 +460,10 @@ impl Snapshot {
             migrate_right_tabs(&mut snapshot.tree);
             snapshot.layout_version = 2;
         }
+        if snapshot.layout_version < 3 {
+            widen_right_column(&mut snapshot.tree);
+            snapshot.layout_version = 3;
+        }
         Some(snapshot)
     }
     pub fn save(&self) -> Result<(), String> {
@@ -445,6 +484,24 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn right_column_migration_increases_width_by_twenty_percent() {
+        let mut tree = default_layout(&[1, 2], false);
+        let root = tree.root.unwrap();
+        if let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get_mut(root) {
+            linear.shares.set_share(linear.children[0], 0.77);
+            linear.shares.set_share(linear.children[1], 0.23);
+        }
+        widen_right_column(&mut tree);
+        let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root) else {
+            panic!("root split");
+        };
+        let left = linear.shares[linear.children[0]];
+        let right = linear.shares[linear.children[1]];
+        assert!((right / (left + right) - 0.23 * 1.2).abs() < 0.0001);
+        assert!(find(&tree, Pane::Terminal(1)).is_some());
+        assert!(find(&tree, Pane::Terminal(2)).is_some());
+    }
     #[test]
     fn separate_monitor_is_migrated_into_server_panel_without_duplicates() {
         let mut tree = default_layout(&[1], false);

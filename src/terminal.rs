@@ -132,6 +132,65 @@ pub struct Session {
 }
 
 impl Session {
+    /// In-memory display fixture: creates no shell or SSH connection.
+    pub fn screenshot_preview(config: crate::connections::SshConfig) -> Result<Self, String> {
+        let size = Size {
+            cols: 100,
+            rows: 28,
+        };
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                cols: 100,
+                rows: 28,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| e.to_string())?;
+        let (tx, events) = mpsc::channel();
+        let term = Arc::new(Mutex::new(Term::new(
+            Config::default(),
+            &size,
+            Proxy { tx },
+        )));
+        let (input, _receiver) = mpsc::sync_channel(1);
+        let console = crate::terminal_agent::Console::new(input, term.clone(), Profile::System);
+        let (_, failures) = mpsc::channel();
+        let mut parser: Processor = Default::default();
+        parser.advance(&mut *term.lock().map_err(|e| e.to_string())?, b"\x1b[36mWelcome to Xpeed Demo Server\x1b[0m\r\nUbuntu 24.04 LTS | SSH workspace preview\r\n\r\n\x1b[32mdeveloper@demo\x1b[0m:/srv/demo$ ls -la\r\n\x1b[34m.cache  .well-known  esta\x1b[0m\r\n.bash_history  hola.php  index.php\r\nfoto.JPG  musica.flac  video.mp4\r\n\r\ndeveloper@demo:/srv/demo$ git status --short\r\n M README.md\r\n M src/main.rs\r\n\r\ndeveloper@demo:/srv/demo$ pwd\r\n/srv/demo\r\n\r\n\x1b[32mdeveloper@demo\x1b[0m:/srv/demo$ ");
+        Ok(Self {
+            id: 9000,
+            shell: Profile::System,
+            title: "SSH demo-server".into(),
+            cwd: "/srv/demo".into(),
+            term,
+            console,
+            master: pair.master,
+            child: None,
+            input: None,
+            events,
+            failures,
+            error: None,
+            exited: false,
+            unexpected_disconnect: false,
+            reconnecting: false,
+            size,
+            started: Instant::now(),
+            scroll_remainder: 0.0,
+            remote: Some(config),
+            palette: Default::default(),
+            input_id: None,
+            commands: Vec::new(),
+            chat_selection: None,
+            search_position: None,
+            record_commands: false,
+            history_key: "preview".into(),
+            submitted_password: None,
+            saved_password: None,
+            auth_complete: true,
+            directory_report: Arc::new(Mutex::new(Some("/srv/demo".into()))),
+            password_draft: crate::credentials::Secret::new(String::new()),
+        })
+    }
     #[cfg(test)]
     pub fn spawn_isolated_test_shell(id: u64, cwd: PathBuf, ctx: egui::Context) -> Self {
         let mut command = if cfg!(windows) {

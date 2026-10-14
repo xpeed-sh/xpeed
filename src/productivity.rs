@@ -88,6 +88,26 @@ impl Drop for Editor {
         self.cancel.store(true, Ordering::Release);
     }
 }
+
+fn editor_language(path: &str) -> Option<(&'static str, &'static str)> {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    let extension = name.rsplit_once('.').map(|(_, extension)| extension);
+    match extension {
+        Some("rs") => Some(("rust", "Rust")),
+        Some("py") => Some(("python", "Python")),
+        Some("toml") => Some(("toml", "TOML")),
+        Some("c" | "h" | "cc" | "cpp" | "cxx" | "hpp") => Some(("cpp", "C/C++")),
+        // The built-in lightweight highlighter recognizes comments, strings and
+        // common keywords through its Python/C++ tokenizers without adding syntect.
+        Some("sh" | "bash" | "zsh" | "bashrc" | "profile") => Some(("python", "Shell")),
+        Some("ps1" | "yaml" | "yml") => Some(("python", "Script")),
+        Some("js" | "jsx" | "ts" | "tsx" | "json" | "php" | "java" | "css") => {
+            Some(("cpp", "Code"))
+        }
+        _ => None,
+    }
+}
+
 impl State {
     pub fn show(
         &mut self,
@@ -237,6 +257,7 @@ impl State {
                 .default_size([650., 440.])
                 .show(ctx, |ui| {
                     let dirty = editor.text != editor.original;
+                    let language = editor_language(path);
                     ui.horizontal(|ui| {
                         if ui
                             .add_enabled(
@@ -267,11 +288,15 @@ impl State {
                                 wake.request_repaint();
                             });
                         }
-                        ui.weak(t(if dirty {
+                        let status = t(if dirty {
                             "Unsaved changes"
                         } else {
                             "UTF-8 - up to 64 KiB"
-                        }));
+                        });
+                        ui.weak(match language {
+                            Some((_, label)) => format!("{label} · {status}"),
+                            None => status.into(),
+                        });
                         if editor.receiver.is_some() {
                             ui.spinner();
                         }
@@ -280,11 +305,37 @@ impl State {
                         ui.colored_label(ui.visuals().error_fg_color, error);
                     }
                     egui::ScrollArea::both().show(ui, |ui| {
+                        let mut layouter =
+                            |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                                let mut job = if let Some((language, _)) = language {
+                                    let theme =
+                                        egui_extras::syntax_highlighting::CodeTheme::from_style(
+                                            ui.style(),
+                                        );
+                                    egui_extras::syntax_highlighting::highlight(
+                                        ui.ctx(),
+                                        ui.style(),
+                                        &theme,
+                                        text.as_str(),
+                                        language,
+                                    )
+                                } else {
+                                    egui::text::LayoutJob::simple(
+                                        text.as_str().into(),
+                                        egui::TextStyle::Monospace.resolve(ui.style()),
+                                        ui.visuals().text_color(),
+                                        f32::INFINITY,
+                                    )
+                                };
+                                job.wrap.max_width = wrap_width;
+                                ui.fonts_mut(|fonts| fonts.layout_job(job))
+                            };
                         ui.add_enabled(
                             editor.loaded && editor.receiver.is_none(),
                             egui::TextEdit::multiline(&mut editor.text)
                                 .font(egui::TextStyle::Monospace)
                                 .code_editor()
+                                .layouter(&mut layouter)
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(20),
                         );
@@ -344,6 +395,17 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editor_selects_lightweight_syntax_from_remote_path() {
+        assert_eq!(
+            editor_language("/srv/install.sh"),
+            Some(("python", "Shell"))
+        );
+        assert_eq!(editor_language("/srv/main.rs"), Some(("rust", "Rust")));
+        assert_eq!(editor_language("/srv/config.toml"), Some(("toml", "TOML")));
+        assert_eq!(editor_language("/srv/image.png"), None);
+    }
+
     #[test]
     fn unsaved_close_confirmation_survives_repaints_until_discard() {
         let ctx = egui::Context::default();

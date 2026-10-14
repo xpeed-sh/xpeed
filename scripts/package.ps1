@@ -21,7 +21,15 @@ New-Item -ItemType Directory -Force -Path $distribution | Out-Null
 $releaseSource = Join-Path $projectRoot 'target\release\xpeed.exe'
 $versionedDestination = Join-Path $distribution "Xpeed-$appVersion.exe"
 if (-not (Test-Path -LiteralPath $versionedDestination) -or (Get-FileHash -LiteralPath $releaseSource).Hash -ne (Get-FileHash -LiteralPath $versionedDestination).Hash) {
-    Copy-Item -LiteralPath $releaseSource -Destination $versionedDestination -Force
+    try {
+        Copy-Item -LiteralPath $releaseSource -Destination $versionedDestination -Force
+    } catch {
+        if ((Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $versionedDestination })) {
+            Write-Warning "Xpeed-$appVersion.exe is open. The portable package and installer will use the newly compiled executable."
+        } else {
+            throw
+        }
+    }
 }
 try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'target\release\xpeed.exe') -Destination (Join-Path $distribution 'Xpeed.exe') -Force
@@ -54,6 +62,9 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot 'assets\preview.png')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\preview.png') -Destination (Join-Path $distribution 'assets\preview.png') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\preview-light.png') -Destination (Join-Path $distribution 'assets\preview-light.png') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\preview-terminal.png') -Destination (Join-Path $distribution 'assets\preview-terminal.png') -Force
+    if (Test-Path -LiteralPath (Join-Path $projectRoot 'assets/previews')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot 'assets/previews') -Destination (Join-Path $distribution 'assets') -Recurse -Force
+    }
 }
 $previousErrorPreference = $ErrorActionPreference
 try {
@@ -84,7 +95,7 @@ foreach ($package in $metadata.packages) {
 $dependencyList | Set-Content -LiteralPath (Join-Path $distribution 'DEPENDENCIES.txt') -Encoding UTF8
 $portableDirectory = Join-Path $distribution "portable\Xpeed-$appVersion"
 New-Item -ItemType Directory -Force -Path $portableDirectory | Out-Null
-Copy-Item -LiteralPath (Join-Path $distribution "Xpeed-$appVersion.exe") -Destination (Join-Path $portableDirectory 'Xpeed.exe') -Force
+Copy-Item -LiteralPath $releaseSource -Destination (Join-Path $portableDirectory 'Xpeed.exe') -Force
 foreach ($document in @('LICENSE', 'THIRD_PARTY.md', 'DEPENDENCIES.txt', 'README.md', 'CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md')) {
     Copy-Item -LiteralPath (Join-Path $distribution $document) -Destination $portableDirectory -Force
 }

@@ -13,10 +13,11 @@ pub struct Browser {
     cut: Vec<(String, bool)>,
     dialog: Option<Dialog>,
     focus_name: bool,
+    upload: Option<(crate::upload_picker::Picker, String)>,
 }
 impl Browser {
     pub fn has_dialog(&self) -> bool {
-        self.dialog.is_some()
+        self.dialog.is_some() || self.upload.is_some()
     }
 }
 enum Dialog {
@@ -27,6 +28,11 @@ enum Dialog {
         name: String,
     },
     Delete(Vec<(String, bool)>),
+    Archive {
+        sources: Vec<String>,
+        destination: String,
+        kind: String,
+    },
 }
 enum Event {
     Back,
@@ -36,6 +42,7 @@ enum Event {
     Edit(String),
     Download(String),
     Mutate(Vec<Mutation>),
+    Archive(Vec<String>, String, String),
 }
 
 fn join(parent: &str, name: &str) -> String {
@@ -248,15 +255,6 @@ fn menu(
     entries: &[Entry],
     events: &mut Vec<Event>,
 ) {
-    if ui.button(xpeed_i18n::t("Seleccionar todo")).clicked() {
-        select_all(browser, parent, entries);
-        ui.close();
-    }
-    if ui.button(xpeed_i18n::t("Quitar selección")).clicked() {
-        browser.selected.clear();
-        ui.close();
-    }
-    ui.separator();
     for (label, folder) in [
         (xpeed_i18n::t("Nuevo archivo"), false),
         (xpeed_i18n::t("Nueva carpeta"), true),
@@ -271,6 +269,27 @@ fn menu(
             browser.focus_name = true;
             ui.close();
         }
+    }
+    if ui.button(xpeed_i18n::t("Upload files…")).clicked() {
+        browser.upload = Some((Default::default(), parent.into()));
+        ui.close();
+    }
+    ui.separator();
+    let has_selection = !browser.selected.is_empty();
+    if ui
+        .button(xpeed_i18n::t(if has_selection {
+            "Deseleccionar todo"
+        } else {
+            "Seleccionar todo"
+        }))
+        .clicked()
+    {
+        if has_selection {
+            browser.selected.clear();
+        } else {
+            select_all(browser, parent, entries);
+        }
+        ui.close();
     }
     if ui
         .add_enabled(
@@ -318,6 +337,33 @@ fn context(
     }
     if ui.button(xpeed_i18n::t("Cortar para mover")).clicked() {
         cut_selection(browser);
+        ui.close();
+    }
+    ui.menu_button(xpeed_i18n::t("Compress…"), |ui| {
+        for kind in ["zip", "tar.gz", "rar"] {
+            if ui.button(kind.to_uppercase()).clicked() {
+                browser.dialog = Some(Dialog::Archive {
+                    sources: browser.selected.keys().cloned().collect(),
+                    destination: format!("archive.{kind}"),
+                    kind: kind.into(),
+                });
+                ui.close();
+            }
+        }
+    });
+    if !entry.directory
+        && [
+            ".zip", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz",
+        ]
+        .iter()
+        .any(|suffix| entry.name.to_lowercase().ends_with(suffix))
+        && ui.button(xpeed_i18n::t("Extract to folder…")).clicked()
+    {
+        browser.dialog = Some(Dialog::Archive {
+            sources: vec![path.into()],
+            destination: format!("{}-extracted", entry.name),
+            kind: "extract".into(),
+        });
         ui.close();
     }
     if ui
@@ -641,115 +687,117 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
         }
         ui.separator();
         let footer = if browser.selected.is_empty() { 0. } else { 39. }
-            + if remote.operation_running() { 37. } else { 0. };
-        let background = ui.interact(
-            egui::Rect::from_min_size(
-                ui.cursor().min,
-                Vec2::new(
-                    ui.available_width(),
-                    (ui.available_height() - footer).max(50.),
-                ),
-            ),
-            ui.id().with("background"),
-            egui::Sense::click(),
-        );
+            + if remote.operation_running() { 64. } else { 0. };
         egui::ScrollArea::vertical()
             .id_salt("items")
             .auto_shrink([false, false])
             .max_height((ui.available_height() - footer).max(50.))
             .show_viewport(ui, |ui, viewport| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut all = !remote.entries.is_empty()
-                            && remote.entries.iter().all(|e| {
-                                browser.selected.contains_key(&join(&remote.path, &e.name))
-                            });
-                        if ui.checkbox(&mut all, "").clicked() {
-                            if all {
-                                select_all(&mut browser, &remote.path, &remote.entries);
-                            } else {
-                                browser.selected.clear();
-                            }
-                        }
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(19.), egui::Sense::hover());
-                        svg_icons::draw(ui.painter(), r, Icon::Folder, p.accent);
-                        let label = format!("{name}: {}", remote.host());
-                        let width = (ui.available_width() - if busy { 86. } else { 0. }).max(1.);
-                        let (rect, response) =
-                            ui.allocate_exact_size(Vec2::new(width, 24.), egui::Sense::hover());
-                        filename(ui, rect, &label, p, false);
-                        response.on_hover_text(label);
-                        if busy {
-                            ui.label(
-                                RichText::new(xpeed_i18n::t("- cargando…"))
-                                    .size(10.)
-                                    .color(p.muted),
-                            );
-                        }
-                    });
-                    if browser.grid {
-                        let columns = (ui.available_width() / 78.).floor().max(1.) as usize;
-                        let width =
-                            (ui.available_width() - (columns - 1) as f32 * 4.) / columns as f32;
-                        let count = remote.entries.len().div_ceil(columns);
-                        let top = ui.cursor().min.y - ui.max_rect().top();
-                        let range = visible_range(viewport, top, 85., count);
-                        ui.add_space(range.start as f32 * 85.);
-                        for chunk in remote
-                            .entries
-                            .chunks(columns)
-                            .skip(range.start)
-                            .take(range.len())
-                        {
-                            ui.horizontal(|ui| {
-                                for entry in chunk {
-                                    tile(
-                                        ui,
-                                        &mut browser,
-                                        &join(&remote.path, &entry.name),
-                                        entry,
-                                        p,
-                                        &mut events,
-                                        width,
-                                    );
+                let background = ui
+                    .add_enabled_ui(!busy, |ui| {
+                        ui.horizontal(|ui| {
+                            let mut all = !remote.entries.is_empty()
+                                && remote.entries.iter().all(|e| {
+                                    browser.selected.contains_key(&join(&remote.path, &e.name))
+                                });
+                            if ui.checkbox(&mut all, "").clicked() {
+                                if all {
+                                    select_all(&mut browser, &remote.path, &remote.entries);
+                                } else {
+                                    browser.selected.clear();
                                 }
+                            }
+                            let (r, _) =
+                                ui.allocate_exact_size(Vec2::splat(19.), egui::Sense::hover());
+                            svg_icons::draw(ui.painter(), r, Icon::Folder, p.accent);
+                            let label = format!("{name}: {}", remote.host());
+                            let width =
+                                (ui.available_width() - if busy { 86. } else { 0. }).max(1.);
+                            let (rect, response) =
+                                ui.allocate_exact_size(Vec2::new(width, 24.), egui::Sense::click());
+                            filename(ui, rect, &label, p, false);
+                            response.on_hover_text(label).context_menu(|ui| {
+                                menu(ui, &mut browser, &remote.path, &remote.entries, &mut events)
                             });
+                            if busy {
+                                ui.label(
+                                    RichText::new(xpeed_i18n::t("- cargando…"))
+                                        .size(10.)
+                                        .color(p.muted),
+                                );
+                            }
+                        });
+                        if browser.grid {
+                            let columns = (ui.available_width() / 78.).floor().max(1.) as usize;
+                            let width =
+                                (ui.available_width() - (columns - 1) as f32 * 4.) / columns as f32;
+                            let count = remote.entries.len().div_ceil(columns);
+                            let top = ui.cursor().min.y - ui.max_rect().top();
+                            let range = visible_range(viewport, top, 85., count);
+                            ui.add_space(range.start as f32 * 85.);
+                            for chunk in remote
+                                .entries
+                                .chunks(columns)
+                                .skip(range.start)
+                                .take(range.len())
+                            {
+                                ui.horizontal(|ui| {
+                                    for entry in chunk {
+                                        tile(
+                                            ui,
+                                            &mut browser,
+                                            &join(&remote.path, &entry.name),
+                                            entry,
+                                            p,
+                                            &mut events,
+                                            width,
+                                        );
+                                    }
+                                });
+                            }
+                            ui.add_space((count - range.end) as f32 * 85.);
+                        } else {
+                            let mut listing = Vec::new();
+                            rows(remote, &remote.path, &remote.entries, 0, &mut listing);
+                            let top = ui.cursor().min.y - ui.max_rect().top();
+                            let range = visible_range(viewport, top, 31., listing.len());
+                            ui.add_space(range.start as f32 * 31.);
+                            for (path, entry, depth) in &listing[range.clone()] {
+                                item(
+                                    ui,
+                                    &mut browser,
+                                    remote,
+                                    path,
+                                    entry,
+                                    *depth,
+                                    p,
+                                    &mut events,
+                                );
+                            }
+                            ui.add_space((listing.len() - range.end) as f32 * 31.);
                         }
-                        ui.add_space((count - range.end) as f32 * 85.);
-                    } else {
-                        let mut listing = Vec::new();
-                        rows(remote, &remote.path, &remote.entries, 0, &mut listing);
-                        let top = ui.cursor().min.y - ui.max_rect().top();
-                        let range = visible_range(viewport, top, 31., listing.len());
-                        ui.add_space(range.start as f32 * 31.);
-                        for (path, entry, depth) in &listing[range.clone()] {
-                            item(
-                                ui,
-                                &mut browser,
-                                remote,
-                                path,
-                                entry,
-                                *depth,
-                                p,
-                                &mut events,
+                        if remote.entries.is_empty() && !busy && remote.error.is_none() {
+                            ui.label(
+                                RichText::new(xpeed_i18n::t("Carpeta vacía"))
+                                    .small()
+                                    .color(p.dim),
                             );
                         }
-                        ui.add_space((listing.len() - range.end) as f32 * 31.);
-                    }
-                    if remote.entries.is_empty() && !busy && remote.error.is_none() {
-                        ui.label(
-                            RichText::new(xpeed_i18n::t("Carpeta vacía"))
-                                .small()
-                                .color(p.dim),
-                        );
-                    }
-                });
+                        let content_height = ui.cursor().min.y - ui.max_rect().top();
+                        let blank_height = (viewport.height() - content_height).max(0.);
+                        ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), blank_height),
+                            egui::Sense::click(),
+                        )
+                        .1
+                    })
+                    .inner;
+                if !busy {
+                    background.context_menu(|ui| {
+                        menu(ui, &mut browser, &remote.path, &remote.entries, &mut events)
+                    });
+                }
             });
-        if !busy {
-            background.context_menu(|ui| {
-                menu(ui, &mut browser, &remote.path, &remote.entries, &mut events)
-            });
-        }
         if !browser.selected.is_empty() {
             ui.separator();
             ui.add_enabled_ui(!busy, |ui| {
@@ -793,6 +841,19 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
         let modal = egui::Modal::new(egui::Id::new(("file_dialog", id))).show(ui.ctx(), |ui| {
             ui.set_width(320.);
             match dialog {
+                Dialog::Archive { sources, destination, kind } => {
+                    ui.heading(xpeed_i18n::t(if kind == "extract" { "Extract to folder…" } else { "Compress…" }));
+                    ui.label(xpeed_i18n::t("Runs on the server. Requires Python 3. RAR requires additional server tools. Existing destinations are not overwritten."));
+                    ui.label(xpeed_i18n::t("Destination name:"));
+                    ui.text_edit_singleline(destination);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(valid_name(destination) && !destination.contains('\\'), egui::Button::new(xpeed_i18n::t("Start"))).clicked() {
+                            events.push(Event::Archive(sources.clone(), destination.clone(), kind.clone()));
+                            done = true;
+                        }
+                        if ui.button(xpeed_i18n::t("Cancelar")).clicked() { done = true; }
+                    });
+                }
                 Dialog::Name {
                     parent,
                     old,
@@ -871,6 +932,38 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
             browser.dialog = None;
         }
     }
+    if let Some((picker, destination)) = &mut browser.upload
+        && let Some(plan) = picker.show(ui.ctx(), id, destination)
+    {
+        let relative = |path: &std::path::Path| {
+            let parts: Option<Vec<_>> = path
+                .components()
+                .map(|component| match component {
+                    std::path::Component::Normal(name) => name.to_str().map(str::to_owned),
+                    _ => None,
+                })
+                .collect();
+            parts.map(|parts| parts.join("/"))
+        };
+        let directories = plan
+            .directories
+            .into_iter()
+            .filter_map(|path| {
+                let path = relative(&path)?;
+                Some(join(destination, &path))
+            })
+            .collect();
+        let files = plan
+            .files
+            .into_iter()
+            .filter_map(|(local, path)| {
+                let path = relative(&path)?;
+                Some((local, join(destination, &path)))
+            })
+            .collect();
+        remote.upload_tree(files, directories);
+        browser.upload = None;
+    }
     let dropped = ui.ctx().input(|i| i.raw.dropped_files.clone());
     if ui.rect_contains_pointer(ui.max_rect()) && !busy && !dropped.is_empty() {
         let mut files = Vec::new();
@@ -890,6 +983,13 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
         .transferred
         .load(std::sync::atomic::Ordering::Acquire);
     if remote.operation_running() {
+        if let Ok(status) = remote.transfer_file.lock()
+            && !status.is_empty()
+        {
+            ui.add(egui::Label::new(status.as_str()).truncate());
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
         ui.horizontal(|ui| {
             if remote.transfer_total > 0 {
                 ui.add(
@@ -898,7 +998,10 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
                         .text(format!("{} / {}", size(bytes), size(remote.transfer_total))),
                 );
             } else {
-                ui.label(size(bytes));
+                ui.spinner();
+                if bytes > 0 {
+                    ui.label(size(bytes));
+                }
             }
             if ui.small_button(xpeed_i18n::t("Cancelar")).clicked() {
                 remote.cancel_operation();
@@ -916,6 +1019,9 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
             Event::Edit(path) => remote.edit_requested = Some(path),
             Event::Download(path) => remote.download_requested = Some(path),
             Event::Mutate(ops) => remote.mutate(ops),
+            Event::Archive(sources, destination, kind) => {
+                remote.archive(sources, destination, &kind)
+            }
         }
     }
 }
@@ -1056,6 +1162,37 @@ mod tests {
         cut_selection(&mut browser);
         assert_eq!(browser.cut.len(), 2);
         assert!(!browser.cut.iter().any(|(p, _)| p.ends_with("/file")));
+    }
+    #[test]
+    fn blank_space_menu_creates_uploads_and_toggles_selection() {
+        for grid in [false, true] {
+            let ctx = egui::Context::default();
+            let mut remote = RemoteExplorer::preview();
+            remote.browser.grid = grid;
+            for _ in 0..4 {
+                render(&ctx, &mut remote, vec![]);
+            }
+            let blank = egui::pos2(140., 470.);
+            click(&ctx, &mut remote, blank, egui::PointerButton::Secondary);
+            let mut output = render(&ctx, &mut remote, vec![]);
+            for _ in 0..3 {
+                output = render(&ctx, &mut remote, vec![]);
+            }
+            for label in ["Nuevo archivo", "Nueva carpeta", "Upload files…"] {
+                text_pos(&output, label);
+            }
+            let select = text_pos(&output, "Seleccionar todo") + Vec2::splat(5.);
+            click(&ctx, &mut remote, select, egui::PointerButton::Primary);
+            assert_eq!(remote.browser.selected.len(), remote.entries.len());
+            click(&ctx, &mut remote, blank, egui::PointerButton::Secondary);
+            for _ in 0..4 {
+                output = render(&ctx, &mut remote, vec![]);
+            }
+            let clear = text_pos(&output, "Deseleccionar todo") + Vec2::splat(5.);
+            click(&ctx, &mut remote, clear, egui::PointerButton::Primary);
+            assert!(remote.browser.selected.is_empty());
+            assert!(!remote.busy());
+        }
     }
     #[test]
     fn right_click_opens_actions_and_rename_dialog_without_starting_transport() {

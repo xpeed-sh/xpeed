@@ -19,6 +19,7 @@ mod terminal;
 mod terminal_agent;
 mod terminal_view;
 mod updates;
+mod upload_picker;
 mod window_size;
 mod workspace;
 fn main() -> eframe::Result {

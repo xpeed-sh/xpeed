@@ -75,3 +75,15 @@ Los controles y el árbol usan vectores dibujados por la interfaz en `src/app.rs
 ## Contrato de extensiones
 
 Consulta [docs/EXTENSIONS.md](EXTENSIONS.md) para desarrollar adaptadores y contribuciones de paneles. El uso de cada extensión se documenta en su propio proyecto.
+
+## Capturas del README
+
+Con el ejecutable compilado, ejecuta `scripts/capture-previews.ps1`. Genera capturas nativas en `assets/previews/` para los seis temas, conexión/archivos y extensiones, con datos ficticios y sin consultar perfiles ni conectar servidores reales.
+
+## Archivos remotos
+
+El menú del explorador permite subir varios archivos a la ruta actual. Se procesan uno a uno por SFTP con buffers acotados, sin un límite de tamaño del producto; dependen del espacio disponible, permisos y conexión. Se muestra archivo actual, cantidad y bytes transferidos. Una colisión o error detiene la cola; los archivos previos completados permanecen. Cancelar no deshace lo ya completado. Se pueden seguir arrastrando archivos al explorador.
+
+Comprimir y extraer son trabajos separados por SSH sobre el servidor actual. Requieren `python3` y shell POSIX. ZIP/TAR usan la biblioteca estándar; crear RAR requiere `rar`, y extraer RAR requiere el módulo Python `rarfile` y `unrar` o `unar`. No se instalan herramientas automáticamente. Se rechazan enlaces y entradas especiales; extraer crea una carpeta nueva sin sobrescribir. Un error o cancelación puede dejar una carpeta parcial, y cerrar el transporte no garantiza detener todos los procesos remotos. La compresión usa un archivo temporal y publica con un enlace duro exclusivo, que debe admitir el sistema de archivos remoto.
+
+Pruebas aisladas del motor: `py -3.12 scripts/test-remote-archive.py`. Las pruebas SSH/SFTP están en `scripts/test-session-tools.py`.

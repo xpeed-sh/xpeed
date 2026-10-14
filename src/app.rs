@@ -20,6 +20,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+const PANEL_GAP: i8 = 5;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SidebarView {
     Sessions,
@@ -530,6 +532,37 @@ impl Xpeed {
             );
         }
         app.apply_preferences();
+        if app.capture.is_some() && args.iter().any(|a| a == "--demo-workspace") {
+            let config = SshConfig {
+                host: "192.0.2.10".into(),
+                user: "developer".into(),
+                ..Default::default()
+            };
+            let connection = Connection {
+                name: "demo-server".into(),
+                target: Target::Ssh(config.clone()),
+            };
+            if let Ok(session) = Session::screenshot_preview(config) {
+                app.sessions.insert(9000, session);
+                app.sources.insert(9000, connection.clone());
+                app.connections.saved.push(connection);
+                app.focused = Some(9000);
+                workspace::add_terminal(&mut app.tree, 9000, None, None);
+                app.tree
+                    .make_active(|_, tile| *tile == Tile::Pane(Pane::Terminal(9000)));
+                let remote = RemoteExplorer::workspace_preview();
+                app.remote_files.insert(9000, remote);
+                app.sidebar_tree
+                    .make_active(|_, tile| *tile == Tile::Pane(Pane::Files));
+                for command in ["ls -la", "git status --short", "pwd"] {
+                    app.history.push(
+                        format!("{} :: preview", connection_key(&app.sources[&9000])),
+                        command.into(),
+                    );
+                }
+                app.apply_preferences();
+            }
+        }
         if app.capture.is_some() && args.iter().any(|a| a == "--demo-panels") {
             app.show(Pane::AppInfo);
             app.show(Pane::ServerInfo);
@@ -592,6 +625,18 @@ impl Xpeed {
                 session.exited = true;
                 session.error =
                     Some("Demo: connection closed. No remote server was contacted.".into());
+            }
+        }
+        if app.capture.is_some() && args.iter().any(|a| a == "--demo-extension-manager") {
+            if let Err(error) = app.extensions.preview_codex(ctx, None) {
+                app.log(error);
+            }
+            app.sidebar_view = SidebarView::Extensions;
+            if let Some(pair) = args
+                .windows(2)
+                .find(|pair| pair[0] == "--demo-installed-details")
+            {
+                app.extensions.request_details(&pair[1]);
             }
         }
         app
@@ -1016,7 +1061,7 @@ impl Xpeed {
                 workspace::refresh_visibility(target);
             }
             let snapshot = Snapshot {
-                layout_version: 2,
+                layout_version: 3,
                 tree,
                 sources: self.sources.clone(),
                 sidebar_tree: Some(sidebar_tree),
@@ -1809,7 +1854,12 @@ impl Xpeed {
             .frame(
                 egui::Frame::new()
                     .fill(p.bg)
-                    .inner_margin(8)
+                    .inner_margin(egui::Margin {
+                        left: if self.settings.sidebar { PANEL_GAP - PANEL_GAP / 2 } else { PANEL_GAP },
+                        right: PANEL_GAP,
+                        top: PANEL_GAP,
+                        bottom: PANEL_GAP,
+                    })
                     .corner_radius(10),
             )
             .show(ctx, |ui| {
@@ -1895,6 +1945,7 @@ impl Xpeed {
                     }
                 }
                 self.tree.ui(&mut behavior, ui);
+                paint_dock_dividers(ui, &self.tree, p);
             });
         if edited {
             self.log(xpeed_i18n::t("Panel reorganizado, redimensionado o seleccionado").into());
@@ -2018,6 +2069,7 @@ impl Xpeed {
             }
         }
         self.sidebar_tree.ui(&mut behavior, ui);
+        paint_dock_dividers(ui, &self.sidebar_tree, p);
         if edited {
             self.changed();
         }
@@ -2044,10 +2096,15 @@ impl Xpeed {
         let p = self.palette();
         let mut changed = false;
         let mut preset = None;
-        egui::SidePanel::left("options_panel")
+        let panel = egui::SidePanel::left("options_panel")
             .default_width(300.0).min_width(250.0).max_width(420.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().fill(p.bg).inner_margin(egui::Margin::same(8)))
+            .frame(egui::Frame::new().fill(p.bg).inner_margin(egui::Margin {
+                left: PANEL_GAP,
+                right: PANEL_GAP / 2,
+                top: PANEL_GAP,
+                bottom: PANEL_GAP,
+            }))
             .show(ctx, |ui| {
                 if self.sidebar_view == SidebarView::Sessions { self.session_sidebar_ui(ui); return; }
                 if self.sidebar_view == SidebarView::Extensions {
@@ -2141,6 +2198,30 @@ impl Xpeed {
                     });
                 });
             });
+        // Keep the divider on its panel layer, below popup menus and modals.
+        let painter = ctx.layer_painter(panel.response.layer_id);
+        let rect = panel.response.rect;
+        let x = rect.right() + 0.5;
+        // Cover the native hover/drag stroke and paint the same rounded divider
+        // used by the dock tree. The transparent gap still receives resizing.
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                egui::pos2(x, rect.center().y),
+                Vec2::new(f32::from(PANEL_GAP), rect.height()),
+            ),
+            0,
+            p.bg,
+        );
+        paint_divider(
+            ctx,
+            &painter,
+            egui::Id::new("options_divider_drag"),
+            egui::Rect::from_min_max(
+                egui::pos2(x - 1.0, rect.top() + 10.0),
+                egui::pos2(x + 1.0, rect.bottom() - 10.0),
+            ),
+            p,
+        );
         if changed {
             xpeed_i18n::set_language(self.settings.language);
             self.extensions.language_changed(self.settings.language);
@@ -2577,6 +2658,17 @@ impl Xpeed {
     }
 }
 impl eframe::App for Xpeed {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+        if self.capture.is_some() {
+            input.events.retain(|event| {
+                !matches!(
+                    event,
+                    egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }
+                )
+            });
+            input.events.push(egui::Event::PointerGone);
+        }
+    }
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0; 4]
     }
@@ -3285,7 +3377,10 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
         34.0
     }
     fn gap_width(&self, _style: &egui::Style) -> f32 {
-        8.0
+        f32::from(PANEL_GAP)
+    }
+    fn resize_stroke(&self, _style: &egui::Style, _state: egui_tiles::ResizeState) -> Stroke {
+        Stroke::NONE
     }
     fn min_size(&self) -> f32 {
         110.0
@@ -3336,6 +3431,107 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
     }
     fn on_edit(&mut self, _action: EditAction) {
         *self.edited = true;
+    }
+}
+
+fn paint_divider(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    id: egui::Id,
+    rect: egui::Rect,
+    palette: Palette,
+) {
+    if !rect.is_positive() {
+        return;
+    }
+    let vertical = rect.height() > rect.width();
+    let hit = rect.expand2(if vertical {
+        Vec2::new(4.0, 10.0)
+    } else {
+        Vec2::new(10.0, 4.0)
+    });
+    let (pressed, down, dragging, pointer) = ctx.input(|i| {
+        (
+            i.pointer.button_pressed(egui::PointerButton::Primary),
+            i.pointer.button_down(egui::PointerButton::Primary),
+            i.pointer.is_decidedly_dragging(),
+            i.pointer.interact_pos(),
+        )
+    });
+    let active = ctx.data_mut(|data| {
+        let mut active = data.get_temp::<bool>(id).unwrap_or(false);
+        if pressed {
+            active = pointer.is_some_and(|pos| hit.contains(pos));
+        }
+        if !down {
+            active = false;
+        }
+        data.insert_temp(id, active);
+        active
+    });
+    if active && dragging {
+        painter.rect_filled(rect, 1, palette.accent);
+        return;
+    }
+    let hovered = ctx.pointer_hover_pos().is_some_and(|pos| hit.contains(pos));
+    let color = if hovered {
+        palette.muted
+    } else {
+        palette.muted.gamma_multiply(0.65)
+    };
+    for offset in [-4.0, 0.0, 4.0] {
+        let point = rect.center()
+            + if vertical {
+                Vec2::new(0.0, offset)
+            } else {
+                Vec2::new(offset, 0.0)
+            };
+        painter.circle_filled(point, 1.0, color);
+    }
+}
+
+fn paint_dock_dividers(ui: &egui::Ui, tree: &Tree<Pane>, palette: Palette) {
+    for (&id, tile) in tree.tiles.iter() {
+        let Tile::Container(egui_tiles::Container::Linear(linear)) = tile else {
+            continue;
+        };
+        if !tree.tiles.is_visible(id) {
+            continue;
+        }
+        let Some(parent) = tree.tiles.rect(id) else {
+            continue;
+        };
+        let children: Vec<_> = linear
+            .children
+            .iter()
+            .filter(|&&id| tree.tiles.is_visible(id))
+            .filter_map(|&id| tree.tiles.rect(id))
+            .collect();
+        for (index, pair) in children.windows(2).enumerate() {
+            let rect = match linear.dir {
+                egui_tiles::LinearDir::Horizontal => {
+                    let x = (pair[0].right() + pair[1].left()) / 2.0;
+                    egui::Rect::from_min_max(
+                        egui::pos2(x - 1.0, parent.top() + 10.0),
+                        egui::pos2(x + 1.0, parent.bottom() - 10.0),
+                    )
+                }
+                egui_tiles::LinearDir::Vertical => {
+                    let y = (pair[0].bottom() + pair[1].top()) / 2.0;
+                    egui::Rect::from_min_max(
+                        egui::pos2(parent.left() + 10.0, y - 1.0),
+                        egui::pos2(parent.right() - 10.0, y + 1.0),
+                    )
+                }
+            };
+            paint_divider(
+                ui.ctx(),
+                ui.painter(),
+                ui.id().with((id, "divider_drag", index)),
+                rect,
+                palette,
+            );
+        }
     }
 }
 

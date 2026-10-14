@@ -1,4 +1,4 @@
-//! SFTP v3 over the user's OpenSSH transport. No remote shell commands.
+//! SFTP v3 over OpenSSH, with explicit server-side archive jobs over SSH.
 use crate::connections::SshConfig;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -175,6 +175,7 @@ pub struct RemoteExplorer {
     pub download_requested: Option<String>,
     pub transferred: Arc<AtomicU64>,
     pub transfer_total: u64,
+    pub transfer_file: Arc<Mutex<String>>,
     cache: BTreeMap<String, (std::time::Instant, Listing)>,
     retry_listing: bool,
     home: Option<String>,
@@ -210,6 +211,7 @@ impl RemoteExplorer {
             download_requested: None,
             transferred: Arc::new(AtomicU64::new(0)),
             transfer_total: 0,
+            transfer_file: Default::default(),
             cache: BTreeMap::new(),
             retry_listing: false,
             home: None,
@@ -253,6 +255,20 @@ impl RemoteExplorer {
             ],
         );
         explorer.expanded.insert("/doolpool.com/esta".into());
+        explorer
+    }
+    pub fn workspace_preview() -> Self {
+        let mut explorer = Self::preview();
+        explorer.path = "/srv/demo".into();
+        explorer.home = Some(explorer.path.clone());
+        explorer.children = std::mem::take(&mut explorer.children)
+            .into_iter()
+            .map(|(key, value)| (key.replace("/doolpool.com", "/srv/demo"), value))
+            .collect();
+        explorer.expanded = std::mem::take(&mut explorer.expanded)
+            .into_iter()
+            .map(|key| key.replace("/doolpool.com", "/srv/demo"))
+            .collect();
         explorer
     }
     pub fn resume_follow(&mut self) {
@@ -343,7 +359,22 @@ impl RemoteExplorer {
         }
     }
     pub fn transfer(&mut self, files: Vec<(std::path::PathBuf, String)>, download: bool) {
-        if self.busy() || files.is_empty() {
+        self.transfer_tree(files, Vec::new(), download);
+    }
+    pub fn upload_tree(
+        &mut self,
+        files: Vec<(std::path::PathBuf, String)>,
+        directories: Vec<String>,
+    ) {
+        self.transfer_tree(files, directories, false);
+    }
+    fn transfer_tree(
+        &mut self,
+        files: Vec<(std::path::PathBuf, String)>,
+        directories: Vec<String>,
+        download: bool,
+    ) {
+        if self.busy() || files.is_empty() && directories.is_empty() {
             return;
         }
         let config = self.config.clone();
@@ -358,9 +389,14 @@ impl RemoteExplorer {
                 .iter()
                 .filter_map(|(p, _)| p.metadata().ok())
                 .map(|m| m.len())
-                .sum()
+                .fold(0u64, u64::saturating_add)
         };
         let progress = self.transferred.clone();
+        let file_status = self.transfer_file.clone();
+        let count = files.len();
+        if let Ok(mut status) = file_status.lock() {
+            *status = format!("0 / {count}");
+        }
         let (tx, rx) = mpsc::channel();
         self.operation = Some(rx);
         self.error = None;
@@ -375,13 +411,116 @@ impl RemoteExplorer {
                 active,
                 |input, output| {
                     init_streams(input, output)?;
-                    for (local, remote) in files {
+                    if !directories.is_empty() {
+                        if let Ok(mut status) = file_status.lock() {
+                            *status = xpeed_i18n::t("Creating remote folders…").into();
+                        }
+                        for (index, remote) in directories.iter().enumerate() {
+                            if cancel.load(Ordering::Acquire) {
+                                return Err(xpeed_i18n::t("Operation cancelled").into());
+                            }
+                            let mut body = string(remote.as_bytes());
+                            body.extend_from_slice(&0u32.to_be_bytes());
+                            expect_ok(&request(
+                                input,
+                                output,
+                                14,
+                                u32::MAX - index as u32,
+                                &body,
+                            )?)?;
+                            heartbeat.fetch_add(1, Ordering::Release);
+                        }
+                    }
+                    for (index, (local, remote)) in files.into_iter().enumerate() {
+                        if let Ok(mut status) = file_status.lock() {
+                            *status = format!(
+                                "{} / {} · {}",
+                                index + 1,
+                                count,
+                                local.file_name().unwrap_or_default().to_string_lossy()
+                            );
+                        }
                         transfer_streams(
                             input, output, &local, &remote, download, &cancel, &progress,
                             &heartbeat,
                         )?;
                     }
                     Ok(())
+                },
+            );
+            let _ = tx.send(result);
+        });
+    }
+    pub fn archive(&mut self, sources: Vec<String>, destination: String, kind: &str) {
+        if self.busy() {
+            return;
+        }
+        let cwd = self.path.clone();
+        let prefix = format!("{}/", cwd.trim_end_matches('/'));
+        let relative: Option<Vec<_>> = sources
+            .iter()
+            .map(|path| path.strip_prefix(&prefix).map(str::to_owned))
+            .collect();
+        let Some(sources) = relative else {
+            self.error = Some("Archive sources must belong to the current folder.".into());
+            return;
+        };
+        let sources: Vec<_> = sources
+            .iter()
+            .filter(|path| {
+                !sources
+                    .iter()
+                    .any(|parent| *path != parent && path.starts_with(&format!("{parent}/")))
+            })
+            .cloned()
+            .collect();
+        let request =
+            serde_json::json!({"cwd":cwd,"sources":sources,"destination":destination,"kind":kind})
+                .to_string();
+        let quoted = format!("'{}'", request.replace('\'', "'\\''"));
+        let command = format!(
+            "python3 - {quoted} <<'XPEED_ARCHIVE_SCRIPT'\n{}\nXPEED_ARCHIVE_SCRIPT",
+            include_str!("../scripts/remote-archive.py")
+        );
+        let config = self.config.clone();
+        let password = self.password.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.operation_cancel = Some(cancel.clone());
+        self.transfer_total = 0;
+        self.transferred.store(0, Ordering::Release);
+        let status = self.transfer_file.clone();
+        if let Ok(mut text) = status.lock() {
+            *text = xpeed_i18n::t("Processing archive on server…").into();
+        }
+        let (tx, rx) = mpsc::channel();
+        self.operation = Some(rx);
+        self.error = None;
+        std::thread::spawn(move || {
+            let result = transport_mode(
+                &config,
+                cancel,
+                password,
+                None,
+                Arc::new(AtomicU64::new(0)),
+                Some(&command),
+                |_input, output| {
+                    let mut complete = false;
+                    let mut line = String::new();
+                    let mut reader = std::io::BufReader::new(output);
+                    use std::io::BufRead;
+                    while reader.read_line(&mut line).map_err(|e| e.to_string())? > 0 {
+                        if line.trim() == "XPEED_ARCHIVE_OK" {
+                            complete = true;
+                        } else if let Ok(mut text) = status.lock() {
+                            *text = line.chars().take(300).collect();
+                        }
+                        line.clear();
+                    }
+                    if complete {
+                        Ok(())
+                    } else {
+                        Err("Archive operation failed. Python 3 is required on the server; partial extraction folders may remain.".into())
+                    }
                 },
             );
             let _ = tx.send(result);
@@ -422,6 +561,9 @@ impl RemoteExplorer {
             self.operation = None;
             self.operation_cancel = None;
             self.transfer_total = 0;
+            if let Ok(mut status) = self.transfer_file.lock() {
+                status.clear();
+            }
             self.transferred.store(0, Ordering::Release);
             match result {
                 Ok(()) => {
@@ -845,6 +987,21 @@ fn transport_monitored<T>(
         &mut std::process::ChildStdout,
     ) -> Result<T, String>,
 ) -> Result<T, String> {
+    transport_mode(config, cancel, password, hosts, active, None, operation)
+}
+#[allow(clippy::too_many_arguments)]
+fn transport_mode<T>(
+    config: &SshConfig,
+    cancel: Arc<AtomicBool>,
+    password: Option<crate::credentials::Secret>,
+    hosts: Option<&std::path::Path>,
+    active: Arc<AtomicU64>,
+    shell: Option<&str>,
+    operation: impl FnOnce(
+        &mut std::process::ChildStdin,
+        &mut std::process::ChildStdout,
+    ) -> Result<T, String>,
+) -> Result<T, String> {
     config.validate()?;
     let mut command = Command::new("ssh");
     if let Some(hosts) = hosts {
@@ -894,8 +1051,12 @@ fn transport_monitored<T>(
     if !config.identity.is_empty() {
         command.args(["-i", &config.identity]);
     }
+    if let Some(shell) = shell {
+        command.args(["--", &config.host, shell]);
+    } else {
+        command.args(["-s", "--", &config.host, "sftp"]);
+    }
     command
-        .args(["-s", "--", &config.host, "sftp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1336,6 +1497,23 @@ mod tests {
             .unwrap(),
             "first\n"
         );
+        let channel = transport_mode(
+            &config,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            Some(&hosts),
+            Arc::new(AtomicU64::new(0)),
+            Some("printf 'XPEED_ARCHIVE_CHANNEL_OK'"),
+            |_input, output| {
+                let mut text = String::new();
+                output
+                    .read_to_string(&mut text)
+                    .map_err(|e| e.to_string())?;
+                Ok(text)
+            },
+        )
+        .unwrap();
+        assert_eq!(channel, "XPEED_ARCHIVE_CHANNEL_OK");
         eprintln!(
             "SFTP fixture: 256 KiB upload + download + collision + editor conflict in {:?}",
             started.elapsed()
@@ -1352,6 +1530,7 @@ mod tests {
         remote.operation_cancel = Some(cancel.clone());
         remote.transfer_total = 100;
         remote.transferred.store(50, Ordering::Release);
+        *remote.transfer_file.lock().unwrap() = "1 / 3 · large-file.bin".into();
         let rect = eframe::egui::Rect::from_min_size(
             eframe::egui::Pos2::ZERO,
             eframe::egui::vec2(300., 620.),

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.8 - 2026-10-14
+
+- Selector de subida con diálogo nativo del sistema para archivos o carpetas, seguido de una ventana compacta, movible y redimensionable para revisar la selección. Conserva la estructura de las carpetas al subirlas.
+- Editor remoto con resaltado de sintaxis ligero según la extensión, sin añadir un motor pesado ni nuevas dependencias.
+
+- Clic derecho en el espacio vacío del explorador: crear archivo, crear carpeta, subir archivos y alternar entre seleccionar todo y deseleccionar todo. En paneles compactos, el mismo menú está disponible sobre la fila de la conexión actual.
+- Corregido el desplazamiento infinito que podía aparecer al reducir la altura del panel de archivos.
+
+- Corregida la capa del separador lateral: los menús contextuales y diálogos quedan por delante, sin la franja que atravesaba su contenido.
+
+- Explorador: Subir archivos con selección múltiple, cola secuencial, progreso en bytes, archivo actual y cancelación. Sin límite de tamaño impuesto por Xpeed; lectura por bloques.
+- Comprimir ZIP, TAR.GZ o RAR y extraer ZIP/TAR/RAR en una carpeta nueva desde el menú contextual. Requiere Python 3 en el servidor; RAR requiere herramientas adicionales. No sobrescribe destinos existentes.
+
+- Panel derecho un 20 % más ancho por defecto; las distribuciones guardadas con la columna derecha estándar se ajustan una sola vez al cargarlas.
+
+- Xpeed.cmd abre la compilación disponible más reciente para evitar iniciar una copia antigua cuando el ejecutable versionado quedó bloqueado durante el empaquetado.
+
+- Separación uniforme de 5 puntos entre columnas y paneles. Divisores con tres puntos discretos en reposo; al arrastrar muestran una línea de 2 puntos con extremos redondeados y color de acento del tema.
+
+- README renovado como portada del proyecto: marca y badges, navegación, funciones, instalación multiplataforma, galería de los seis temas, conexión/archivos y extensiones. Capturas aisladas con datos de demostración.
+
 ## 0.10.7 - 2026-10-14
 
 - Historial reconoce también el prompt macOS equipo:carpeta usuario$, incluso con el nombre del equipo dividido en varias filas. Pruebas de foco/pegado usan shells e historial aislados y evitan una carrera entre Ctrl+C y la inserción.

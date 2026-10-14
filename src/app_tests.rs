@@ -2,6 +2,113 @@ use super::*;
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect};
 
 #[test]
+fn popup_layer_stays_above_sidebar_divider_even_when_created_first() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    let menu_fill = Color32::from_rgb(255, 0, 255);
+    let mut checked_divider = false;
+    for step in 0..3 {
+        let output = ctx.run(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))),
+                time: Some(step as f64),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::Area::new(egui::Id::new("overlapping_popup"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(egui::pos2(280.0, 300.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::popup(ui.style())
+                            .fill(menu_fill)
+                            .show(ui, |ui| {
+                                ui.set_min_size(egui::vec2(180.0, 100.0));
+                                ui.label("Context menu");
+                            });
+                    });
+                app.sidebar_panel(ctx);
+            },
+        );
+        let menu_index = output.shapes.iter().position(
+            |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Context menu"),
+        );
+        if let Some(menu_index) = menu_index {
+            for (index, shape) in output.shapes.iter().enumerate() {
+                if matches!(&shape.shape, egui::Shape::Circle(circle) if circle.radius == 1.0) {
+                    checked_divider = true;
+                    assert!(index < menu_index, "divider painted over popup");
+                }
+            }
+        }
+    }
+    assert!(checked_divider, "popup and divider must both be rendered");
+}
+
+#[test]
+fn divider_shows_dots_until_dragging_and_returns_to_dots_on_release() {
+    let ctx = egui::Context::default();
+    let palette = Palette::default();
+    let id = egui::Id::new("test_divider");
+    let draw = |events: Vec<Event>, x: f32| {
+        ctx.run(
+            RawInput {
+                events,
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 300.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    paint_divider(
+                        ctx,
+                        ui.painter(),
+                        id,
+                        Rect::from_min_max(egui::pos2(x - 1.0, 20.0), egui::pos2(x + 1.0, 280.0)),
+                        palette,
+                    );
+                });
+            },
+        )
+    };
+    let button = |pos, pressed| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let start = egui::pos2(50.0, 150.0);
+    let hovered = draw(vec![Event::PointerMoved(start)], 50.0);
+    assert_eq!(
+        hovered
+            .shapes
+            .iter()
+            .filter(|s| matches!(s.shape, egui::Shape::Circle(_)))
+            .count(),
+        3
+    );
+    let pressed = draw(vec![button(start, true)], 50.0);
+    assert_eq!(
+        pressed
+            .shapes
+            .iter()
+            .filter(|s| matches!(s.shape, egui::Shape::Circle(_)))
+            .count(),
+        3
+    );
+    let moved = egui::pos2(90.0, 150.0);
+    let dragged = draw(vec![Event::PointerMoved(moved)], 90.0);
+    assert!(dragged.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == palette.accent && r.rect.width() == 2.0)));
+    let released = draw(vec![button(moved, false)], 90.0);
+    assert_eq!(
+        released
+            .shapes
+            .iter()
+            .filter(|s| matches!(s.shape, egui::Shape::Circle(_)))
+            .count(),
+        3
+    );
+}
+
+#[test]
 fn panel_control_svg_remains_square_at_different_display_scales() {
     let ctx = egui::Context::default();
     for scale in [1.0, 2.0, 1.25, 1.0] {
