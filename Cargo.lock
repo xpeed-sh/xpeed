@@ -5133,27 +5133,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "xpeed-codex-extension"
-version = "0.3.2"
-dependencies = [
- "serde_json",
- "xpeed-i18n",
-]
-
-[[package]]
 name = "xpeed-i18n"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "xpeed-server-monitor-extension"
-version = "0.1.3"
-dependencies = [
- "serde_json",
- "xpeed-i18n",
 ]
 
 [[package]]

@@ -11,20 +11,9 @@
     "linux": "bin/xpeed-server-monitor-extension",
     "macos": "bin/xpeed-server-monitor-extension"
   },
-  "capabilities": [
-    "serverMetrics",
-    "localization"
-  ],
-  "permissions": [
-    "Read server metrics"
-  ],
-  "views": [
-    {
-      "id": "monitor",
-      "title": "Monitor",
-      "location": "server"
-    }
-  ],
+  "capabilities": ["serverMetrics", "localization"],
+  "permissions": ["Read server metrics"],
+  "views": [{"id": "monitor", "title": "Monitor", "location": "server"}],
   "localizations": {
     "en": {
       "name": "Server monitor",
@@ -35,12 +24,8 @@
       "name": "Monitor del servidor",
       "description": "CPU, RAM, disco, red y procesos de la pestaña SSH activa, con gráficos en tiempo real.",
       "readme": "README.es.md",
-      "permissions": [
-        "server.metrics.read"
-      ],
-      "views": {
-        "monitor": "Monitor"
-      }
+      "permissions": ["server.metrics.read"],
+      "views": {"monitor": "Monitor"}
     }
   }
 }

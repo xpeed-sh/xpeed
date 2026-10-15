@@ -187,9 +187,7 @@ impl Extensions {
                         egui::TextEdit::singleline(&mut self.git.catalog_input)
                             .hint_text("https://github.com/xpeed-sh/xpeed"),
                     );
-                    ui.weak(xpeed_i18n::t(
-                        "Lee extensions/catalog.json del repositorio.",
-                    ));
+                    ui.weak(xpeed_i18n::t("Lee extensions.json del repositorio."));
                     if ui
                         .add_enabled(
                             !self.git.busy(),

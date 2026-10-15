@@ -2,7 +2,7 @@
 /.tools/
 /artifacts/
 /dist/
-/extensions/packages/
+/extensions/
 
 # Configuración local y secretos
 .env

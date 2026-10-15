@@ -40,7 +40,7 @@ En este equipo, los scripts detectan Rust en `.tools` y MinGW en `C:\msys64\ming
 ## Qué compartir
 
 - `Xpeed-0.10.8.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
-- `extensions/catalog.json` contiene las extensiones disponibles y sus repositorios. Las extensiones instaladas pertenecen a cada usuario y no se copian en la distribución.
+- `extensions.json` contiene las extensiones disponibles y sus repositorios. La entrega no incluye una carpeta `extensions`: Xpeed la crea en los datos del usuario cuando instala la primera extensión.
 - Codex y Monitor se instalan desde sus repositorios públicos mediante el catálogo incluido. La aplicación principal funciona sin extensiones instaladas.
 
 Cada persona inicia sesión en su propia cuenta de ChatGPT. Codex necesita un runtime oficial compatible instalado en ese equipo; Xpeed busca el ejecutable y permite configurar su ruta desde la ficha de la extensión. Las conexiones SSH requieren OpenSSH Client disponible en Windows.

@@ -325,7 +325,7 @@
   "Subcarpeta de extensión (opcional)": "Subcarpeta de extensión (opcional)",
   "Conectar repositorio": "Conectar repositorio",
   "Conectar catálogo de Xpeed": "Conectar catálogo de Xpeed",
-  "Lee extensions/catalog.json del repositorio.": "Lee extensions/catalog.json del repositorio.",
+  "Lee extensions.json del repositorio.": "Lee extensions.json del repositorio.",
   "Conectar catálogo": "Conectar catálogo",
   "Actualizar catálogo Git": "Actualizar catálogo Git",
   "Instalar desde una carpeta": "Instalar desde una carpeta",

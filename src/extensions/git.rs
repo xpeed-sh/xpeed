@@ -30,7 +30,7 @@ mod tests {
     }
     fn manifest() -> Manifest {
         let mut m: Manifest = serde_json::from_str(
-            include_str!("../../extensions/codex/extension.json").trim_start_matches('\u{feff}'),
+            include_str!("fixtures/codex.json").trim_start_matches('\u{feff}'),
         )
         .unwrap();
         m.id = "example.remote".into();
@@ -278,9 +278,39 @@ mod tests {
         extensions.uninstall("example.remote").unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn official_catalog_sources_migrate_to_the_root_index() {
+        let mut source = CatalogSource {
+            repository: "https://github.com/xpeed-sh/xpeed".into(),
+            reference: String::new(),
+            path: "extensions/catalog.json".into(),
+        };
+        migrate_official_catalog_path(&mut source);
+        assert_eq!(source.path, "extensions.json");
+
+        let mut third_party = CatalogSource {
+            repository: "https://github.com/example/catalog".into(),
+            reference: String::new(),
+            path: "extensions/catalog.json".into(),
+        };
+        migrate_official_catalog_path(&mut third_party);
+        assert_eq!(third_party.path, "extensions/catalog.json");
+    }
 }
 fn catalog_path() -> String {
-    "extensions/catalog.json".into()
+    "extensions.json".into()
+}
+
+pub(super) fn migrate_official_catalog_path(source: &mut CatalogSource) {
+    if source.path != "extensions/catalog.json" {
+        return;
+    }
+    let Ok(repository) = Repository::parse(&source.repository, &source.reference, "") else {
+        return;
+    };
+    if repository.owner == "xpeed-sh" && repository.name == "xpeed" {
+        source.path = catalog_path();
+    }
 }
 
 #[derive(Default)]

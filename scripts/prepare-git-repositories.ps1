@@ -10,14 +10,26 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot '.tools/cargo/bin/cargo.exe')
 if (Test-Path -LiteralPath 'C:\msys64\mingw64\bin\gcc.exe') {
     $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
 }
-if (-not $SkipBuild) {
-    cargo build --release --locked -p xpeed-codex-extension -p xpeed-server-monitor-extension
-    if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación de las extensiones' }
-}
-foreach ($entry in @(
+$entries = @(
     @{Name='codex'; Id='xpeed.codex'; Binary='xpeed-codex-extension'},
     @{Name='server-monitor'; Id='xpeed.server-monitor'; Binary='xpeed-server-monitor-extension'}
-)) {
+)
+foreach ($entry in $entries) {
+    $source = Join-Path $projectRoot "extensions\$($entry.Name)"
+    $cargoManifest = Join-Path $source 'Cargo.toml'
+    if (-not (Test-Path -LiteralPath $cargoManifest)) {
+        throw "Falta $source. Clona el repositorio independiente de la extensión en esa ruta."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $source 'Cargo.lock'))) {
+        cargo generate-lockfile --manifest-path $cargoManifest
+        if ($LASTEXITCODE -ne 0) { throw "No se pudo crear Cargo.lock para $($entry.Name)" }
+    }
+    if (-not $SkipBuild) {
+        cargo build --release --locked --manifest-path $cargoManifest --target-dir (Join-Path $projectRoot 'target') --bin $entry.Binary
+        if ($LASTEXITCODE -ne 0) { throw "Falló la compilación de $($entry.Name)" }
+    }
+}
+foreach ($entry in $entries) {
     $source = Join-Path $projectRoot "extensions\$($entry.Name)"
     $destination = Join-Path $projectRoot "dist\git-repositories\$($entry.Id)"
     if (Test-Path -LiteralPath (Join-Path $destination '.git')) {

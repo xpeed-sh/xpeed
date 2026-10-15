@@ -1144,8 +1144,7 @@ mod tests {
     fn access_menu_selection_persists_both_modes_without_changing_active_authority() {
         let path =
             std::env::temp_dir().join(format!("xpeed-access-{}.json", rand::random::<u64>()));
-        let manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+        let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),
@@ -1222,9 +1221,7 @@ mod tests {
                 }
             }
             assert_eq!(runtime.tools.approve_task, full);
-            let manifest =
-                serde_json::from_str(include_str!("../../extensions/codex/extension.json"))
-                    .unwrap();
+            let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
             let mut restored = Runtime::new(
                 manifest,
                 PathBuf::new(),
@@ -1242,7 +1239,7 @@ mod tests {
     #[test]
     fn intermediate_messages_have_one_combined_copy_footer() {
         let mut runtime = Runtime::new(
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap(),
+            serde_json::from_str(include_str!("fixtures/codex.json")).unwrap(),
             PathBuf::new(),
             true,
             Path::new("."),
@@ -1273,7 +1270,7 @@ mod tests {
     #[test]
     fn response_actions_render_once_next_to_their_own_turn() {
         let mut runtime = Runtime::new(
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap(),
+            serde_json::from_str(include_str!("fixtures/codex.json")).unwrap(),
             PathBuf::new(),
             true,
             Path::new("."),
@@ -1328,8 +1325,7 @@ mod tests {
 
     #[test]
     fn sending_from_chat_list_starts_a_fresh_chat_and_preserves_previous_draft() {
-        let manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+        let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),
@@ -1434,8 +1430,7 @@ mod tests {
 
     #[test]
     fn late_approval_executes_once_and_keeps_real_output_for_continuation() {
-        let manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+        let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),
@@ -1486,8 +1481,7 @@ mod tests {
 
     #[test]
     fn account_gates_navigation_and_composer_fits_a_narrow_panel() {
-        let manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+        let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),

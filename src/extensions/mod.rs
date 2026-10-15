@@ -897,10 +897,8 @@ impl Extensions {
         if !data.valid() {
             return Err(xpeed_i18n::t("Dashboard inválido").into());
         }
-        let manifest: Manifest = serde_json::from_str(include_str!(
-            "../../extensions/server-monitor/extension.json"
-        ))
-        .map_err(|e| e.to_string())?;
+        let manifest: Manifest = serde_json::from_str(include_str!("fixtures/server-monitor.json"))
+            .map_err(|e| e.to_string())?;
         let folder = self
             .catalog
             .iter()
@@ -922,8 +920,7 @@ impl Extensions {
             return Err(xpeed_i18n::t("La vista previa requiere una captura aislada").into());
         }
         let manifest: Manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json"))
-                .map_err(|e| e.to_string())?;
+            serde_json::from_str(include_str!("fixtures/codex.json")).map_err(|e| e.to_string())?;
         let folder = self.cwd.join("extensions/packages/xpeed.codex");
         let mut runtime = Runtime::new(manifest, folder, true, &self.cwd, String::new());
         if let Some(id) = selected {
@@ -1222,11 +1219,14 @@ impl Extensions {
             .unwrap_or_else(|| cwd.into())
             .join("xpeed")
             .join("extensions");
-        let preferences = if ephemeral {
+        let mut preferences = if ephemeral {
             Preferences::default()
         } else {
             read_json(&root.join("preferences.json")).unwrap_or_default()
         };
+        for source in &mut preferences.catalog_sources {
+            git::migrate_official_catalog_path(source);
+        }
         let mut this = Self {
             selected_fragment: None,
             targets: BTreeMap::new(),
@@ -1257,11 +1257,11 @@ impl Extensions {
             attach_terminal: false,
             server_context: Value::Null,
         };
-        let mut catalogs = vec![cwd.join("extensions/catalog.json")];
+        let mut catalogs = vec![cwd.join("extensions.json")];
         if let Ok(exe) = std::env::current_exe()
             && let Some(parent) = exe.parent()
         {
-            catalogs.push(parent.join("extensions/catalog.json"));
+            catalogs.push(parent.join("extensions.json"));
         }
         for path in catalogs {
             if let Ok(items) = read_json::<Vec<CatalogItem>>(&path) {
@@ -2249,11 +2249,44 @@ pub fn smoke_test(package: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
+    fn bundled_catalog_is_loaded_only_from_the_project_root() {
+        let temp = std::env::temp_dir().join(format!(
+            "xpeed-root-catalog-test-{:016x}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(temp.join("extensions")).unwrap();
+        std::fs::write(
+            temp.join("extensions.json"),
+            r#"[{"id":"example.current","name":"Current","repository":"https://github.com/example/current"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.join("extensions/catalog.json"),
+            r#"[{"id":"example.legacy","name":"Legacy","repository":"https://github.com/example/legacy"}]"#,
+        )
+        .unwrap();
+
+        let manager = Extensions::new(&temp, true);
+        assert!(
+            manager
+                .catalog
+                .iter()
+                .any(|(item, _)| item.id == "example.current")
+        );
+        assert!(
+            !manager
+                .catalog
+                .iter()
+                .any(|(item, _)| item.id == "example.legacy")
+        );
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+    #[test]
     fn chat_extensions_get_independent_panels_and_selection_never_sends_or_grants_scope() {
         let cwd = std::env::temp_dir();
         let mut manager = Extensions::new(&cwd, true);
         let mut manifest: Manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+            serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         manager.runtimes.insert(
             manifest.id.clone(),
             Runtime::new(manifest.clone(), cwd.clone(), true, &cwd, String::new()),
@@ -2286,10 +2319,8 @@ mod tests {
     }
     #[test]
     fn localized_metadata_keeps_identity_and_rejects_external_readmes() {
-        let mut m: Manifest = serde_json::from_str(include_str!(
-            "../../extensions/server-monitor/extension.json"
-        ))
-        .unwrap();
+        let mut m: Manifest =
+            serde_json::from_str(include_str!("fixtures/server-monitor.json")).unwrap();
         let id = m.id.clone();
         assert_eq!(
             m.locale_for(xpeed_i18n::Language::English)
@@ -2352,7 +2383,7 @@ mod tests {
         std::fs::create_dir_all(temp.join("package/bin")).unwrap();
         let source = temp.join("package");
         let mut manifest: Manifest = serde_json::from_str(
-            include_str!("../../extensions/codex/extension.json").trim_start_matches('\u{feff}'),
+            include_str!("fixtures/codex.json").trim_start_matches('\u{feff}'),
         )
         .unwrap();
         let binary = if cfg!(windows) {
@@ -2412,7 +2443,7 @@ mod tests {
     #[test]
     fn manifests_cannot_escape_the_package_or_spoof_protocol() {
         let mut manifest: Manifest = serde_json::from_str(
-            include_str!("../../extensions/codex/extension.json").trim_start_matches('\u{feff}'),
+            include_str!("fixtures/codex.json").trim_start_matches('\u{feff}'),
         )
         .unwrap();
         assert!(manifest.validate().is_ok());
@@ -2432,7 +2463,7 @@ mod tests {
     #[test]
     fn non_chat_views_are_scoped_validated_and_receive_content() {
         let mut manifest: Manifest = serde_json::from_str(
-            include_str!("../../extensions/codex/extension.json").trim_start_matches('\u{feff}'),
+            include_str!("fixtures/codex.json").trim_start_matches('\u{feff}'),
         )
         .unwrap();
         manifest.capabilities.clear();
@@ -2477,10 +2508,8 @@ mod tests {
     }
     #[test]
     fn metrics_require_declared_access_and_reject_previous_server_dashboards() {
-        let mut manifest: Manifest = serde_json::from_str(include_str!(
-            "../../extensions/server-monitor/extension.json"
-        ))
-        .unwrap();
+        let mut manifest: Manifest =
+            serde_json::from_str(include_str!("fixtures/server-monitor.json")).unwrap();
         manifest.permissions.clear();
         let mut runtime = Runtime::new(
             manifest,
@@ -2520,7 +2549,7 @@ mod tests {
     #[test]
     fn streamed_messages_merge_final_text_without_duplicates() {
         let manifest: Manifest = serde_json::from_str(
-            include_str!("../../extensions/codex/extension.json").trim_start_matches('\u{feff}'),
+            include_str!("fixtures/codex.json").trim_start_matches('\u{feff}'),
         )
         .unwrap();
         let mut runtime = Runtime::new(
@@ -2544,8 +2573,7 @@ mod tests {
     }
     #[test]
     fn disconnect_archives_chat_and_revokes_session_authority() {
-        let manifest: Manifest =
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap();
+        let manifest: Manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),

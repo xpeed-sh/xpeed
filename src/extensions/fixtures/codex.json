@@ -11,14 +11,7 @@
     "linux": "bin/xpeed-codex-extension",
     "macos": "bin/xpeed-codex-extension"
   },
-  "capabilities": [
-    "chat",
-    "login",
-    "models",
-    "approvals",
-    "localization",
-    "sessionTools"
-  ],
+  "capabilities": ["chat", "login", "models", "approvals", "localization", "sessionTools"],
   "permissions": [
     "Start the local Codex process",
     "Connect to the provider using the Codex account",
@@ -34,11 +27,7 @@
       "name": "Codex",
       "description": "Codex con cuenta de ChatGPT y herramientas para sesiones locales y SSH seleccionadas.",
       "readme": "README.es.md",
-      "permissions": [
-        "Iniciar el proceso local de Codex",
-        "Conectar al proveedor con la cuenta de Codex",
-        "sessions.tools"
-      ],
+      "permissions": ["Iniciar el proceso local de Codex", "Conectar al proveedor con la cuenta de Codex", "sessions.tools"],
       "views": {}
     }
   }

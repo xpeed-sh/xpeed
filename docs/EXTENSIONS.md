@@ -4,16 +4,16 @@
 
 | Extensión | Versión del adaptador | Documentación | Historial |
 | --- | --- | --- | --- |
-| Codex | 0.3.2 | [README](../extensions/codex/README.es.md) | [CHANGELOG](../extensions/codex/CHANGELOG.md) |
-| Monitor del servidor | 0.1.3 | [README](../extensions/server-monitor/README.es.md) | [CHANGELOG](../extensions/server-monitor/CHANGELOG.md) |
+| Codex | 0.3.2 | [README](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md) | [CHANGELOG](https://github.com/xpeed-sh/extension-codex/blob/main/CHANGELOG.md) |
+| Monitor del servidor | 0.1.3 | [README](https://github.com/xpeed-sh/extension-server-monitor/blob/main/README.es.md) | [CHANGELOG](https://github.com/xpeed-sh/extension-server-monitor/blob/main/CHANGELOG.md) |
 
-Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados. El script de exportación comprueba esos números e incluye su changelog. Los proyectos publicados viven en `xpeed-sh/extension-codex` y `xpeed-sh/extension-server-monitor`. La carpeta fuente `extensions/` permanece en el workspace de Xpeed para compilar y probar el contrato junto al host; no se incluye como paquete en el instalador. `extensions/packages/` contiene artefactos locales generados y excluidos de Git. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
+Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados en su propio repositorio: `xpeed-sh/extension-codex` y `xpeed-sh/extension-server-monitor`. El repositorio principal ignora por completo `extensions/`; puedes clonar allí esos proyectos para desarrollarlos y probarlos localmente sin volver a publicarlos con Xpeed. Las pruebas del núcleo usan manifiestos mínimos en `src/extensions/fixtures`. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
 
 Las secciones con números de versión describen la evolución del contrato. Actualmente cada extensión de chat tiene su propio panel; no existe un contenedor IA compartido. Las extensiones se abren desde el gestor o el menú Extensiones.
 
 ## Herramientas de sesiones (0.8.0)
 
-Codex 0.3.2 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta [instalación, permisos y limitaciones](../extensions/codex/README.es.md), incluidas las versiones compatibles del runtime oficial.
+Codex 0.3.2 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta su [instalación, permisos y limitaciones](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md), incluidas las versiones compatibles del runtime oficial.
 
 Una extensión solicita acceso con la capacidad `sessionTools` y el permiso `sessions.tools`. El host genera `scopeToken` cuando el usuario selecciona destinos para una conversación. Sus metadatos públicos contienen ID, nombre, tipo, estado, host, shell y directorio; no incluyen contraseñas, claves ni objetos de terminal.
 
@@ -25,7 +25,7 @@ Desde **0.7.1**, la interfaz inicia en inglés; cambia a español en **Settings 
 
 En **Xpeed 0.7.0**, el gestor divide la columna en **Instaladas** y **Catálogo**, con búsqueda, scroll independiente y un separador ajustable. Selecciona una extensión para abrir su ficha como pestaña central: allí puedes instalarla, activarla, abrir su panel, configurar el proveedor y desinstalarla. El menú **Git** conecta repositorios y catálogos; también conserva la instalación desde una carpeta local.
 
-Desde **Xpeed 0.6.13**, el catálogo incluye **Monitor del servidor 0.1.0**, una vista derecha opcional con gráficos y procesos de la pestaña SSH activa. Consulta [requisitos, instalación e interpretación de métricas](../extensions/server-monitor/README.md).
+Desde **Xpeed 0.6.13**, el catálogo incluye **Monitor del servidor 0.1.0**, una vista derecha opcional con gráficos y procesos de la pestaña SSH activa. Consulta sus [requisitos, instalación e interpretación de métricas](https://github.com/xpeed-sh/extension-server-monitor/blob/main/README.md).
 
 Xpeed 0.6.0 incorpora paquetes locales independientes del ejecutable principal. La primera extensión es **Codex 0.1.0**. El icono Extensiones reemplaza el contenido de la segunda columna por un gestor para instalar, activar, desactivar y desinstalar. Instalar y activar no inicia procesos: el proveedor arranca al pulsar **Conectar** en IA.
 
@@ -48,7 +48,7 @@ src/                    # opcional
 
 En el manifiesto, `"icon": "assets/icon.png"` es opcional. Por ahora admite PNG de hasta 2 MiB y 1024 × 1024 píxeles. Sin imagen utiliza el icono integrado. El título, editor, descripción y versión proceden del manifiesto, y el contenido de la ficha del README.
 
-El índice `extensions/catalog.json` puede estar junto al proyecto Xpeed o dentro de su repositorio. Cada entrada solo necesita el ID y la URL; `reference`, `packagePath` y `requirements` son opcionales:
+El índice `extensions.json` está en la raíz del proyecto Xpeed y de su distribución. Cada entrada solo necesita el ID y la URL; `reference`, `packagePath` y `requirements` son opcionales:
 
 ```json
 [
@@ -61,9 +61,9 @@ El índice `extensions/catalog.json` puede estar junto al proyecto Xpeed o dentr
 ]
 ```
 
-Para leer el índice remoto, usa **Conectar catálogo** con `https://github.com/xpeed-sh/xpeed`. Busca `extensions/catalog.json` en la rama predeterminada. **Actualizar catálogo Git** vuelve a consultar sus entradas y fichas. Las fuentes conectadas y los metadatos se conservan localmente, de modo que un fallo de red no vacía el catálogo. La caché está en `%APPDATA%\xpeed\extension-cache` en Windows. Para una extensión instalada desde Git, abre su ficha, desconéctala y usa Actualizar desde Git; revisa los permisos antes de aplicar el cambio. Puedes restaurar una versión conservada localmente. Refrescar el catálogo solo actualiza las fichas.
+Para leer el índice remoto, usa **Conectar catálogo** con `https://github.com/xpeed-sh/xpeed`. Busca `extensions.json` en la rama predeterminada. **Actualizar catálogo Git** vuelve a consultar sus entradas y fichas. Las configuraciones antiguas que apuntaban al índice oficial en `extensions/catalog.json` se migran automáticamente. Las fuentes conectadas y los metadatos se conservan localmente, de modo que un fallo de red no vacía el catálogo. La caché está en `%APPDATA%\xpeed\extension-cache` en Windows. Para una extensión instalada desde Git, abre su ficha, desconéctala y usa Actualizar desde Git; revisa los permisos antes de aplicar el cambio. Puedes restaurar una versión conservada localmente. Refrescar el catálogo solo actualiza las fichas.
 
-El archivo [catalog.json](../extensions/catalog.json) es el único índice de extensiones disponibles y apunta a los repositorios públicos de Codex y Monitor. La lista de instaladas no usa otro catálogo: Xpeed escanea `%APPDATA%\xpeed\extensions` en Windows y la carpeta de datos equivalente en Linux/macOS. Activación, rutas de proveedores y origen Git se guardan en las preferencias locales del usuario.
+El archivo [extensions.json](../extensions.json) es el único índice de extensiones disponibles y apunta a los repositorios públicos de Codex y Monitor. La lista de instaladas no usa otro catálogo: Xpeed escanea `%APPDATA%\xpeed\extensions` en Windows y la carpeta de datos equivalente en Linux/macOS. Esa carpeta se crea bajo demanda y nunca se rellena con los proyectos de desarrollo. Activación, rutas de proveedores y origen Git se guardan en las preferencias locales del usuario.
 
 Ejecuta `powershell -ExecutionPolicy Bypass -File scripts/prepare-git-repositories.ps1` para regenerar proyectos independientes en `dist/git-repositories/xpeed.codex` y `dist/git-repositories/xpeed.server-monitor`. Incluyen código, Cargo.lock propio, imagen, manifiesto, binario Windows, licencias y CI. Conserva `bin/` versionado para que la instalación desde Git sea directa.
 
@@ -71,7 +71,7 @@ La instalación clona la rama o etiqueta, valida el ID contra el catálogo y com
 
 ## Paquete
 
-Ejemplo: `extensions/codex/extension.json`. Usa un ID como `publisher.extension`, protocolo 1, versión propia, nombre, descripción, editor, licencia, capacidades y rutas de ejecutables por plataforma (`windows`, `linux`, `macos`). Incluye todos los archivos necesarios dentro del paquete; no se admiten rutas absolutas, enlaces simbólicos ni rutas que salgan de él. Límite de instalación: 64 MiB y 512 entradas. El adaptador Codex no incluye el CLI oficial.
+Cada repositorio de extensión contiene su propio `extension.json`. Usa un ID como `publisher.extension`, protocolo 1, versión propia, nombre, descripción, editor, licencia, capacidades y rutas de ejecutables por plataforma (`windows`, `linux`, `macos`). Incluye todos los archivos necesarios dentro del paquete; no se admiten rutas absolutas, enlaces simbólicos ni rutas que salgan de él. Límite de instalación: 64 MiB y 512 entradas. El adaptador Codex no incluye el CLI oficial.
 
 Los paquetes se copian a la carpeta de configuración de Xpeed, en `extensions/<id>`. En Windows: `%APPDATA%\xpeed\extensions`. `preferences.json` guarda activación y rutas opcionales a proveedores; no guarda tokens ni contraseñas. La distribución de paneles se migra conservando el espacio de trabajo anterior.
 
@@ -112,9 +112,9 @@ Responde a las solicitudes en menos de 60 segundos. Las respuestas de chat llega
 
 ## Desarrollo y comprobaciones
 
-`cargo test --workspace --locked` y `cargo clippy --workspace --locked --all-targets -- -D warnings` comprueban núcleo y adaptador.
+`cargo test --workspace --locked` y `cargo clippy --workspace --locked --all-targets -- -D warnings` comprueban el núcleo. Cada extensión ejecuta su propio CI en su repositorio.
 
-`cargo build --release -p xpeed-codex-extension --features test-provider --locked` genera también `mock-codex`, un proveedor de prueba que no se empaqueta.
+Con Codex clonado en `extensions/codex`, `cargo build --release --manifest-path extensions/codex/Cargo.toml --target-dir target --features test-provider --locked` genera también `mock-codex`, un proveedor de prueba que no se empaqueta.
 
 `py scripts/test-codex-extension.py target/release/xpeed-codex-extension.exe --provider target/release/mock-codex.exe --mock` comprueba login simulado, streaming, aprobaciones, errores, interrupción y apagado.
 

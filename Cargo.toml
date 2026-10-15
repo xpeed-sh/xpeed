@@ -43,7 +43,8 @@ strip = true
 
 
 [workspace]
-members = ["extensions/codex", "extensions/server-monitor", "crates/xpeed-i18n"]
+members = ["crates/xpeed-i18n"]
+exclude = ["extensions/*"]
 default-members = ["."]
 resolver = "3"
 

@@ -22,11 +22,19 @@ impl Default for SshConfig {
     }
 }
 impl SshConfig {
+    fn clean(value: &str) -> &str {
+        value.trim_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '\u{200B}' | '\u{FEFF}')
+        })
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        if self.host.is_empty()
-            || self.host.starts_with('-')
-            || !self
-                .host
+        let host = Self::clean(&self.host);
+        let user = Self::clean(&self.user);
+        let identity = Self::clean(&self.identity);
+        if host.is_empty()
+            || host.starts_with('-')
+            || !host
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || ".:_-".contains(c))
         {
@@ -38,9 +46,8 @@ impl SshConfig {
         if self.port == 0 {
             return Err(xpeed_i18n::t("El puerto debe estar entre 1 y 65535.").into());
         }
-        if self.user.starts_with('-')
-            || !self
-                .user
+        if user.starts_with('-')
+            || !user
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
         {
@@ -48,16 +55,18 @@ impl SshConfig {
                 xpeed_i18n::t("El nombre de usuario contiene caracteres no válidos.").into(),
             );
         }
-        if !self.identity.is_empty() && !PathBuf::from(&self.identity).is_file() {
+        if !identity.is_empty() && !PathBuf::from(identity).is_file() {
             return Err(xpeed_i18n::t("No se encontró el archivo de clave privada.").into());
         }
         Ok(())
     }
     pub fn label(&self) -> String {
-        if self.user.is_empty() {
-            self.host.clone()
+        let host = Self::clean(&self.host);
+        let user = Self::clean(&self.user);
+        if user.is_empty() {
+            host.into()
         } else {
-            format!("{}@{}", self.user, self.host)
+            format!("{user}@{host}")
         }
     }
     pub fn command(&self) -> Result<CommandBuilder, String> {
@@ -88,13 +97,15 @@ impl SshConfig {
             "-p",
             &self.port.to_string(),
         ]);
-        if !self.user.is_empty() {
-            command.args(["-l", &self.user]);
+        let user = Self::clean(&self.user);
+        let identity = Self::clean(&self.identity);
+        if !user.is_empty() {
+            command.args(["-l", user]);
         }
-        if !self.identity.is_empty() {
-            command.args(["-i", &self.identity]);
+        if !identity.is_empty() {
+            command.args(["-i", identity]);
         }
-        command.args(["--", &self.host]);
+        command.args(["--", Self::clean(&self.host)]);
         Ok(command)
     }
 }
@@ -192,7 +203,14 @@ mod tests {
                 .is_err()
             );
         }
-        for host in ["server.example.org", "127.0.0.1", "::1", "my-ssh-alias"] {
+        for host in [
+            "server.example.org",
+            "127.0.0.1",
+            "37.60.231.67",
+            "::1",
+            "my-ssh-alias",
+            " 37.60.231.67\u{200B} ",
+        ] {
             assert!(
                 SshConfig {
                     host: host.into(),

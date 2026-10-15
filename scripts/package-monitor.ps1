@@ -7,11 +7,20 @@ if (Test-Path -LiteralPath "$projectRoot\.tools\cargo\bin\cargo.exe") {
     $env:RUSTUP_HOME = Join-Path $projectRoot '.tools\rustup'
     $env:PATH = "$projectRoot\.tools\cargo\bin;C:\msys64\mingw64\bin;$env:PATH"
 }
+$extensionRoot = Join-Path $projectRoot 'extensions\server-monitor'
+$extensionManifest = Join-Path $extensionRoot 'Cargo.toml'
+if (-not (Test-Path -LiteralPath $extensionManifest)) {
+    throw 'Falta extensions\server-monitor. Clona https://github.com/xpeed-sh/extension-server-monitor en esa ruta.'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $extensionRoot 'Cargo.lock'))) {
+    cargo generate-lockfile --manifest-path $extensionManifest
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo crear Cargo.lock para Monitor' }
+}
 if (-not $SkipBuild) {
-    cargo build --release --locked -p xpeed-server-monitor-extension --bin xpeed-server-monitor-extension
+    cargo build --release --locked --manifest-path $extensionManifest --target-dir "$projectRoot\target" --bin xpeed-server-monitor-extension
     if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación de la extensión' }
 }
-$metadataJson = cargo metadata --locked --format-version 1
+$metadataJson = cargo metadata --locked --manifest-path $extensionManifest --format-version 1
 if ($LASTEXITCODE -ne 0) { throw 'No se pudieron consultar las licencias del adaptador' }
 $metadata = $metadataJson | ConvertFrom-Json
 $adapter = $metadata.packages | Where-Object { $_.name -eq 'xpeed-server-monitor-extension' }
@@ -24,7 +33,7 @@ while ($pending.Count -gt 0) {
     $node = $metadata.resolve.nodes | Where-Object { $_.id -eq $dependencyId }
     foreach ($dependency in $node.dependencies) { $pending.Enqueue($dependency) }
 }
-foreach ($base in @('extensions\packages', 'dist\extensions\packages')) {
+foreach ($base in @('extensions\packages')) {
     $package = Join-Path $projectRoot "$base\xpeed.server-monitor"
     New-Item -ItemType Directory -Force "$package\bin" | Out-Null
     Copy-Item -LiteralPath "$projectRoot\target\release\xpeed-server-monitor-extension.exe" -Destination "$package\bin\xpeed-server-monitor-extension.exe" -Force
@@ -47,6 +56,4 @@ foreach ($base in @('extensions\packages', 'dist\extensions\packages')) {
     }
     $notices | Set-Content -LiteralPath (Join-Path $package 'THIRD_PARTY.txt') -Encoding UTF8
 }
-New-Item -ItemType Directory -Force "$projectRoot\dist\extensions" | Out-Null
-Copy-Item -LiteralPath "$projectRoot\extensions\catalog.json" -Destination "$projectRoot\dist\extensions\catalog.json" -Force
 Write-Output 'Extensión lista: extensions\packages\xpeed.server-monitor. Para preparar su proyecto Git usa scripts/prepare-git-repositories.ps1.'

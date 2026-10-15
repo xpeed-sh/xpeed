@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     fn runtime() -> Runtime {
         Runtime::new(
-            serde_json::from_str(include_str!("../../extensions/codex/extension.json")).unwrap(),
+            serde_json::from_str(include_str!("fixtures/codex.json")).unwrap(),
             PathBuf::new(),
             true,
             std::path::Path::new("."),

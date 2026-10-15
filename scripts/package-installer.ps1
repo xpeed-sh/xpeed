@@ -8,7 +8,7 @@ if (-not $SkipBuild) {
     & (Join-Path $PSScriptRoot 'package.ps1')
 }
 $payloadDirectory = Join-Path $projectRoot "dist\portable\Xpeed-$appVersion"
-foreach ($requiredFile in @('Xpeed.exe', 'LICENSE', 'THIRD_PARTY.md', 'VERSION', 'extensions\catalog.json')) {
+foreach ($requiredFile in @('Xpeed.exe', 'LICENSE', 'THIRD_PARTY.md', 'VERSION', 'extensions.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payloadDirectory $requiredFile))) { throw "Falta $requiredFile en la entrega portátil. Ejecuta scripts/package.ps1 primero." }
 }
 if ((Get-Content -LiteralPath (Join-Path $payloadDirectory 'VERSION') -Raw).Trim() -ne $appVersion) { throw 'La versión del paquete no coincide con VERSION.' }

@@ -45,5 +45,3 @@ jobs:
           path: |
             target/release/xpeed
             target/release/xpeed.exe
-            target/release/xpeed-codex-extension
-            target/release/xpeed-codex-extension.exe

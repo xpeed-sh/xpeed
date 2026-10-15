@@ -2265,7 +2265,17 @@ impl Xpeed {
             field(ui, xpeed_i18n::t("Nombre"), &mut editor.name, xpeed_i18n::t("Ej. Desarrollo / Producción"));
             field(ui, xpeed_i18n::t("Project / group"), &mut editor.group, xpeed_i18n::t("Optional"));
             if editor.remote {
-                ui.add_space(8.0); field(ui, xpeed_i18n::t("Host o alias SSH"), &mut editor.ssh.host, "servidor.example.com");
+                ui.add_space(8.0);
+                if field(
+                    ui,
+                    xpeed_i18n::t("Host o alias SSH"),
+                    &mut editor.ssh.host,
+                    "servidor.example.com",
+                )
+                .changed()
+                {
+                    editor.error = None;
+                }
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| { ui.label(xpeed_i18n::t("Usuario (opcional)")); ui.add(egui::TextEdit::singleline(&mut editor.ssh.user).desired_width(320.0).hint_text(xpeed_i18n::t("Usar configuración SSH"))); });
                     ui.vertical(|ui| { ui.label(xpeed_i18n::t("Puerto")); ui.add(egui::DragValue::new(&mut editor.ssh.port).range(1..=65535)); });
@@ -3544,13 +3554,13 @@ fn local_connection(shell: Profile, cwd: &std::path::Path) -> Connection {
         },
     }
 }
-fn field(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str) {
+fn field(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str) -> egui::Response {
     ui.label(label);
     ui.add(
         egui::TextEdit::singleline(text)
             .hint_text(hint)
             .desired_width(f32::INFINITY),
-    );
+    )
 }
 fn status_dot(ui: &mut egui::Ui, color: Color32) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(9.0), egui::Sense::hover());

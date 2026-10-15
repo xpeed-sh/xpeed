@@ -45,12 +45,11 @@ foreach ($document in @('CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.m
 $technicalDocs = Join-Path $distribution 'docs'
 New-Item -ItemType Directory -Force -Path $technicalDocs | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs') -File -Filter '*.md' | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $technicalDocs -Force }
-$catalogDirectory = Join-Path $distribution 'extensions'
-if (Test-Path -LiteralPath $catalogDirectory) {
-    Remove-Item -LiteralPath $catalogDirectory -Recurse -Force
+$oldExtensionPayload = Join-Path $distribution 'extensions'
+if (Test-Path -LiteralPath $oldExtensionPayload) {
+    Remove-Item -LiteralPath $oldExtensionPayload -Recurse -Force
 }
-New-Item -ItemType Directory -Force -Path $catalogDirectory | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions\catalog.json') -Destination $catalogDirectory -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions.json') -Destination $distribution -Force
 $additionalNotices = Join-Path $distribution 'licenses\additional'
 New-Item -ItemType Directory -Force -Path $additionalNotices | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'assets\licenses') -File | ForEach-Object {
@@ -101,7 +100,8 @@ Copy-Item -LiteralPath $releaseSource -Destination (Join-Path $portableDirectory
 foreach ($document in @('LICENSE', 'THIRD_PARTY.md', 'DEPENDENCIES.txt', 'README.md', 'CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md')) {
     Copy-Item -LiteralPath (Join-Path $distribution $document) -Destination $portableDirectory -Force
 }
-foreach ($folder in @('licenses', 'extensions', 'assets', 'docs')) {
+Copy-Item -LiteralPath (Join-Path $distribution 'extensions.json') -Destination $portableDirectory -Force
+foreach ($folder in @('licenses', 'assets', 'docs')) {
     $source = Join-Path $distribution $folder
     if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $portableDirectory -Recurse -Force }
 }

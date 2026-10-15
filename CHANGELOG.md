@@ -2,6 +2,8 @@
 
 ## Sin publicar
 
+- El catálogo público pasa a `extensions.json` en la raíz. El repositorio principal y las entregas dejan de versionar la carpeta `extensions`; los proyectos independientes pueden clonarse allí para desarrollo local, mientras las instalaciones se guardan en los datos de cada usuario.
+- Conexiones SSH acepta direcciones pegadas con espacios o caracteres invisibles en los extremos, limpia esos valores antes de invocar OpenSSH y oculta el error anterior al corregir el host.
 - Las fichas de extensiones renderizan Markdown completo e imágenes locales del repositorio. El catálogo conserva de forma acotada los logos y capturas citados antes de instalar.
 - Codex 0.3.2 y Monitor 0.1.3 incorporan logo SVG, capturas propias y README visual en sus repositorios independientes.
 - Catálogo único de extensiones disponibles mediante repositorios Git públicos. Codex y Monitor se publican y versionan de forma independiente.
