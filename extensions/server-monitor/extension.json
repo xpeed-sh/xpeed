@@ -1,7 +1,7 @@
 {
   "id": "xpeed.server-monitor",
   "name": "Server monitor",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "protocolVersion": 1,
   "publisher": "Xpeed",
   "description": "CPU, RAM, disk, network and processes for the active SSH tab, with live charts.",

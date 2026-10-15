@@ -1,14 +1,18 @@
+![Codex for XPEED](assets/logo.svg)
+
 # Codex
 
-**Version:** `0.3.1` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
+**Version:** `0.3.2` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
 
-## Saved conversations (0.3.1)
+## Saved conversations
 
 Xpeed 0.9.1 saves chats, editable titles, drafts, model and task-access preferences in `%APPDATA%/xpeed/extensions/.chat-state/xpeed.codex.json`. Open Codex to restore the existing ChatGPT account and go directly to conversations. Selecting a saved conversation resumes its original provider thread on the next message.
 
 Select current terminal sessions again after restarting. Live scope tokens and pending approvals are never restored. Provider credentials remain managed by the official Codex runtime. Account usage appears below the conversation list.
 
-Optional extension **0.3.1** for **XPEED 0.9.1+**. Codex runs on your computer with official ChatGPT browser sign-in. No API key or remote Codex installation is required. [Español](README.es.md).
+Optional extension **0.3.2** for **XPEED 0.9.1+**. Codex runs on your computer with official ChatGPT browser sign-in. No API key or remote Codex installation is required. [Español](README.es.md).
+
+![Codex working with a selected SSH terminal in XPEED](assets/screenshots/conversation.png)
 
 ## Install and connect
 
@@ -69,7 +73,7 @@ With the release adapter built and its ChatGPT account signed in, `cargo test --
 
 Official references: [Codex App Server](https://learn.chatgpt.com/docs/app-server) and [configuration](https://learn.chatgpt.com/docs/config-file/config-reference). The runtime schema was generated with `codex app-server generate-json-schema --experimental`.
 
-## Codex 0.3.1: visible console and independent panel
+## Visible console and independent panel
 
 Requires Xpeed 0.9.1+. Open **Extensions → Codex** for its own panel. Each chat extension owns a separate panel; the shared AI/Ollama container is removed. Explicitly select target sessions and approve commands. `xpeed_exec` runs in the actual visible PowerShell or SSH/POSIX console, preserving cwd, shell variables and activated environments. `xpeed_read_terminal` reads the authorized screen; its contents cannot authorize further actions.
 

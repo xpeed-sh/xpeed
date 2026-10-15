@@ -1,0 +1,16 @@
+{
+  "contextId": 1,
+  "caption": "demo-server · root@203.0.113.24:22",
+  "status": "Updated · every 3 s · process CPU: % of server",
+  "metrics": [
+    { "label": "CPU", "display": "27.4%", "max": 100, "history": [18, 22, 20, 31, 28, 35, 27] },
+    { "label": "RAM", "display": "3.8 GiB / 8.0 GiB", "max": 100, "history": [42, 43, 44, 46, 45, 47, 48] },
+    { "label": "Disk /", "display": "31.2 GiB / 80.0 GiB", "max": 100, "history": [38, 38, 38.5, 38.7, 39, 39, 39.1] },
+    { "label": "Network eth0", "display": "↓ 1.8 MiB/s · ↑ 420 KiB/s", "max": 2097152, "history": [320000, 780000, 640000, 1550000, 1100000, 1880000, 1320000] }
+  ],
+  "processes": [
+    { "pid": 1842, "start": 101, "name": "postgres", "cpu": 12.8, "memory": 8.4, "memoryBytes": 721420288 },
+    { "pid": 2357, "start": 202, "name": "node", "cpu": 8.6, "memory": 5.1, "memoryBytes": 438304768 },
+    { "pid": 912, "start": 303, "name": "nginx", "cpu": 2.4, "memory": 1.2, "memoryBytes": 103809024 }
+  ]
+}

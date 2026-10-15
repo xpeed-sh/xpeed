@@ -18,8 +18,9 @@ egui_tiles = { version = "0.14.1", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 zeroize = "1"
 rand = "0.9"
-egui_commonmark = { version = "0.22", default-features = false }
+egui_commonmark = { version = "0.22", default-features = false, features = ["pulldown_cmark", "load-images", "svg"] }
 egui_extras = { version = "0.33", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }

@@ -31,6 +31,7 @@ foreach ($base in @('extensions\packages', 'dist\extensions\packages')) {
     Copy-Item -LiteralPath "$projectRoot\extensions\codex\extension.json" -Destination $package -Force
     Copy-Item -LiteralPath "$projectRoot\extensions\codex\README.md" -Destination $package -Force
     Copy-Item -LiteralPath "$projectRoot\extensions\codex\README.es.md" -Destination $package -Force
+    Copy-Item -LiteralPath "$projectRoot\extensions\codex\assets" -Destination $package -Recurse -Force
     foreach ($document in @('VERSION', 'CHANGELOG.md')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot "extensions/codex/$document") -Destination $package -Force
     }

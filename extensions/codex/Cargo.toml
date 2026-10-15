@@ -1,6 +1,6 @@
 [package]
 name = "xpeed-codex-extension"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 description = "Optional Codex app-server adapter for Xpeed"

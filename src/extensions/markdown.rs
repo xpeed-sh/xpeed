@@ -3,6 +3,7 @@ use eframe::egui::{self, RichText};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use std::ops::Range;
+use std::path::Path;
 
 fn code_blocks(text: &str) -> Vec<(Range<usize>, String, String)> {
     let mut blocks = Vec::new();
@@ -105,6 +106,39 @@ pub(super) fn show(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
         }
         prose(ui, cache, &text[end..]);
     });
+}
+
+pub(super) fn show_document(
+    ui: &mut egui::Ui,
+    cache: &mut CommonMarkCache,
+    folder: &Path,
+    text: &str,
+) {
+    let mut base = folder.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        base.insert(0, '/');
+    }
+    if !base.ends_with('/') {
+        base.push('/');
+    }
+    cache.link_hooks_clear();
+    for event in Parser::new(text) {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event
+            && !dest_url.starts_with("https://")
+            && !dest_url.starts_with("http://")
+        {
+            cache.add_link_hook(dest_url.to_string());
+        }
+    }
+    CommonMarkViewer::new()
+        .default_implicit_uri_scheme(format!("file://{base}"))
+        .max_image_width(Some(ui.available_width().max(1.0) as usize))
+        .show(ui, cache, text);
+    for (path, clicked) in cache.link_hooks() {
+        if *clicked {
+            ui.ctx().copy_text(path.clone());
+        }
+    }
 }
 
 #[cfg(test)]

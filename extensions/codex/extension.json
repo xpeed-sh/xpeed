@@ -1,7 +1,7 @@
 {
   "id": "xpeed.codex",
   "name": "Codex",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "protocolVersion": 1,
   "publisher": "Xpeed",
   "description": "Codex with ChatGPT sign-in and tools for explicitly selected local and SSH sessions.",

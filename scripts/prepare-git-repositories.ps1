@@ -21,7 +21,16 @@ foreach ($entry in @(
     $source = Join-Path $projectRoot "extensions\$($entry.Name)"
     $destination = Join-Path $projectRoot "dist\git-repositories\$($entry.Id)"
     if (Test-Path -LiteralPath (Join-Path $destination '.git')) {
-        throw "El destino ya contiene un repositorio Git. Conserva sus cambios antes de regenerar: $destination"
+        $pending = git -C $destination status --porcelain
+        if ($LASTEXITCODE -ne 0 -or $pending) {
+            throw "El repositorio exportado contiene cambios sin guardar: $destination"
+        }
+        foreach ($name in @('src', 'fixtures', 'assets', 'vendor', 'bin', 'licenses', '.github', 'README.md', 'README.en.md', 'README.es.md', 'VERSION', 'CHANGELOG.md', 'extension.json', 'Cargo.toml', 'Cargo.lock', 'LICENSE', 'THIRD_PARTY.txt', '.editorconfig', '.gitattributes', '.gitignore')) {
+            $generated = Join-Path $destination $name
+            if (Test-Path -LiteralPath $generated) {
+                Remove-Item -LiteralPath $generated -Recurse -Force
+            }
+        }
     }
     $version = (Get-Content -LiteralPath (Join-Path $source 'VERSION') -Raw).Trim()
     $manifest = Get-Content -LiteralPath (Join-Path $source 'extension.json') -Raw | ConvertFrom-Json
@@ -34,7 +43,7 @@ foreach ($entry in @(
         throw "Falta la entrada $version en el changelog de $source"
     }
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
-    foreach ($name in @('src', 'fixtures', 'README.md', 'README.en.md', 'README.es.md', 'VERSION', 'CHANGELOG.md', 'extension.json')) {
+    foreach ($name in @('src', 'fixtures', 'assets', 'README.md', 'README.en.md', 'README.es.md', 'VERSION', 'CHANGELOG.md', 'extension.json')) {
         $item = Join-Path $source $name
         if (Test-Path -LiteralPath $item) { Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force }
     }
@@ -50,7 +59,9 @@ foreach ($entry in @(
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo preparar el Cargo.lock del proyecto' }
     New-Item -ItemType Directory -Force -Path (Join-Path $destination 'bin'),(Join-Path $destination 'assets') | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot "target\release\$($entry.Binary).exe") -Destination (Join-Path $destination 'bin') -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\img\app-icon.png') -Destination (Join-Path $destination 'assets\icon.png') -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $destination 'assets\icon.png'))) {
+        throw "Falta assets/icon.png en la extensión: $source"
+    }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $destination -Force
     foreach ($document in @('.editorconfig', '.gitattributes')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $document) -Destination $destination -Force

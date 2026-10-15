@@ -1,8 +1,12 @@
-# Server monitor 0.1.2
+![Server Monitor for XPEED](assets/logo.svg)
 
-**Version:** `0.1.2` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
+# Server monitor 0.1.3
+
+**Version:** `0.1.3` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
 
 Optional MIT-licensed extension for Xpeed. Shows CPU, RAM, root disk usage, traffic for the first four network interfaces other than `lo`, and processes consuming the most CPU or RAM, with up to six minutes of charts.
+
+![Live server metrics and processes in XPEED](assets/screenshots/dashboard.png)
 
 ## Use
 

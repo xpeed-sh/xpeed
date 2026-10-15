@@ -1,10 +1,14 @@
-# Monitor del servidor 0.1.2
+![Monitor del servidor para XPEED](assets/logo.svg)
 
-**Versión:** `0.1.2` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
+# Monitor del servidor 0.1.3
+
+**Versión:** `0.1.3` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
 
 La interfaz y la ficha siguen **Settings → Language** de Xpeed 0.7.1: inglés inicialmente y español al seleccionarlo. Puedes cambiar de idioma mientras está conectado; los gráficos y procesos se conservan. La documentación en inglés está en [README.md](README.md).
 
 Extensión opcional para **Xpeed 0.6.15 o posterior**, licencia MIT. Muestra CPU, RAM, uso del disco raíz, tráfico de las primeras cuatro interfaces de red distintas de `lo` y los procesos que más CPU o RAM consumen, con gráficos de hasta seis minutos.
+
+![Métricas y procesos del servidor en tiempo real dentro de XPEED](assets/screenshots/dashboard.png)
 
 ## Usar
 

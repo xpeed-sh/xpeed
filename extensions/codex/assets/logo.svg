@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
+  <title id="title">Codex for XPEED</title>
+  <desc id="desc">A blue terminal prompt surrounded by a rounded hexagon beside the Codex name.</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#62a4ff"/>
+      <stop offset="1" stop-color="#3269df"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="156" height="156" rx="42" fill="#101827"/>
+  <path d="M90 29 139 57v66l-49 28-49-28V57z" fill="none" stroke="url(#g)" stroke-width="11" stroke-linejoin="round"/>
+  <path d="m62 76 22 18-22 18M91 116h30" fill="none" stroke="#eef6ff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

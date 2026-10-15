@@ -4,6 +4,9 @@ La extensión tiene su propia versión, independiente de Xpeed.
 
 ## Sin publicar
 
+## 0.1.3 — 2026-10-15
+
+- Logo vectorial y captura del panel de métricas incluidos en el repositorio y en la ficha Markdown.
 - Documentación organizada para publicar el proyecto Git independiente, con VERSION y este changelog.
 
 ## 0.1.2 — 2026-10-09

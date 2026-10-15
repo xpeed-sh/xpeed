@@ -1,5 +1,6 @@
 //! Git-backed catalog metadata and installations. No release assets or archives.
 use super::*;
+use pulldown_cmark::{Event, Parser, Tag};
 use std::{
     io::Read,
     process::{Command, Stdio},
@@ -116,11 +117,15 @@ mod tests {
             ),
             (
                 "/repos/example/repo/contents/adapter/README.md?ref=main".into(),
-                b"# Remote README\nDocumentation".to_vec(),
+                b"# Remote README\nDocumentation\n\n![Preview](assets/preview.png)".to_vec(),
             ),
             (
                 "/repos/example/repo/contents/adapter/README.es.md?ref=main".into(),
                 b"# Documentacion en espanol".to_vec(),
+            ),
+            (
+                "/repos/example/repo/contents/adapter/assets/preview.png?ref=main".into(),
+                png.clone(),
             ),
             (
                 "/repos/example/repo/contents/adapter/assets/icon.png?ref=main".into(),
@@ -151,6 +156,7 @@ mod tests {
                 .unwrap()
                 .contains("Remote README")
         );
+        assert!(entry.folder.join("assets/preview.png").is_file());
         let mut extensions = Extensions::new(&cache, true);
         assert!(
             extensions
@@ -507,22 +513,65 @@ fn metadata(
     let folder = repo.cache_folder(cache);
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     // The manifest is committed last so failed mandatory metadata never replaces a valid cache.
-    if let Ok(readme) = file(client, api, repo, &repo.file_path("README.md"), 65536) {
-        std::fs::write(folder.join("README.md"), readme).map_err(|e| e.to_string())?;
-    }
-    let readmes: std::collections::BTreeSet<_> = m
+    let localized_readmes: std::collections::BTreeSet<_> = m
         .localizations
         .values()
         .filter_map(|l| l.readme.as_deref())
-        .filter(|p| *p != "README.md")
+        .filter(|path| *path != "README.md")
         .collect();
+    let readmes = std::iter::once("README.md").chain(localized_readmes);
+    let mut documents = Vec::new();
     for readme in readmes {
         if let Ok(content) = file(client, api, repo, &repo.file_path(readme), 65536) {
             let target = folder.join(readme);
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            std::fs::write(target, content).map_err(|e| e.to_string())?;
+            std::fs::write(&target, &content).map_err(|e| e.to_string())?;
+            if let Ok(text) = std::str::from_utf8(&content) {
+                documents.push((
+                    Path::new(readme)
+                        .parent()
+                        .unwrap_or(Path::new(""))
+                        .to_path_buf(),
+                    text.to_owned(),
+                ));
+            }
+        }
+    }
+    let images: std::collections::BTreeSet<_> = documents
+        .iter()
+        .flat_map(|(parent, text)| {
+            Parser::new(text).filter_map(move |event| {
+                let Event::Start(Tag::Image { dest_url, .. }) = event else {
+                    return None;
+                };
+                let extension = Path::new(dest_url.as_ref())
+                    .extension()
+                    .and_then(|value| value.to_str())?
+                    .to_ascii_lowercase();
+                let path = parent.join(dest_url.as_ref());
+                let path = path.to_string_lossy().replace('\\', "/");
+                (relative_path(&path)
+                    && matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "gif" | "svg"))
+                .then_some(path)
+            })
+        })
+        .take(12)
+        .collect();
+    for image_path in images {
+        if let Ok(image) = file(
+            client,
+            api,
+            repo,
+            &repo.file_path(&image_path),
+            4 * 1024 * 1024,
+        ) {
+            let target = folder.join(&image_path);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(target, image).map_err(|e| e.to_string())?;
         }
     }
     if let Some(icon) = &m.icon

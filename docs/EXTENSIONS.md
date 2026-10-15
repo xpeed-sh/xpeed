@@ -4,8 +4,8 @@
 
 | Extensión | Versión del adaptador | Documentación | Historial |
 | --- | --- | --- | --- |
-| Codex | 0.3.1 | [README](../extensions/codex/README.es.md) | [CHANGELOG](../extensions/codex/CHANGELOG.md) |
-| Monitor del servidor | 0.1.2 | [README](../extensions/server-monitor/README.es.md) | [CHANGELOG](../extensions/server-monitor/CHANGELOG.md) |
+| Codex | 0.3.2 | [README](../extensions/codex/README.es.md) | [CHANGELOG](../extensions/codex/CHANGELOG.md) |
+| Monitor del servidor | 0.1.3 | [README](../extensions/server-monitor/README.es.md) | [CHANGELOG](../extensions/server-monitor/CHANGELOG.md) |
 
 Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados. El script de exportación comprueba esos números e incluye su changelog. Los proyectos publicados viven en `xpeed-sh/extension-codex` y `xpeed-sh/extension-server-monitor`. La carpeta fuente `extensions/` permanece en el workspace de Xpeed para compilar y probar el contrato junto al host; no se incluye como paquete en el instalador. `extensions/packages/` contiene artefactos locales generados y excluidos de Git. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
 
@@ -13,7 +13,7 @@ Las secciones con números de versión describen la evolución del contrato. Act
 
 ## Herramientas de sesiones (0.8.0)
 
-Codex 0.3.1 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta [instalación, permisos y limitaciones](../extensions/codex/README.es.md), incluidas las versiones compatibles del runtime oficial.
+Codex 0.3.2 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta [instalación, permisos y limitaciones](../extensions/codex/README.es.md), incluidas las versiones compatibles del runtime oficial.
 
 Una extensión solicita acceso con la capacidad `sessionTools` y el permiso `sessions.tools`. El host genera `scopeToken` cuando el usuario selecciona destinos para una conversación. Sus metadatos públicos contienen ID, nombre, tipo, estado, host, shell y directorio; no incluyen contraseñas, claves ni objetos de terminal.
 

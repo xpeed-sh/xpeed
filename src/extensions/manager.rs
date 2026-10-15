@@ -1,38 +1,18 @@
 use super::*;
 
-fn document_ui(ui: &mut egui::Ui, manifest: &Manifest, document: &str) {
+fn document_ui(
+    ui: &mut egui::Ui,
+    cache: &mut egui_commonmark::CommonMarkCache,
+    folder: &Path,
+    manifest: &Manifest,
+    document: &str,
+) {
     ui.heading(xpeed_i18n::t("Detalles"));
     ui.add_space(8.0);
     if document.is_empty() {
         ui.add(egui::Label::new(manifest.description()).wrap());
-    }
-    let mut code = false;
-    for line in document.lines() {
-        if line.starts_with("```") {
-            code = !code;
-            continue;
-        }
-        if code {
-            ui.add(egui::Label::new(RichText::new(line).monospace()).wrap());
-        } else if let Some(heading) = line
-            .strip_prefix("# ")
-            .or_else(|| line.strip_prefix("## "))
-            .or_else(|| line.strip_prefix("### "))
-        {
-            ui.add_space(12.0);
-            ui.heading(heading);
-        } else if line.is_empty() {
-            ui.add_space(7.0);
-        } else {
-            ui.add(
-                egui::Label::new(
-                    line.replace("**", "")
-                        .replace('`', "")
-                        .replace('\u{2192}', " / "),
-                )
-                .wrap(),
-            );
-        }
+    } else {
+        super::markdown::show_document(ui, cache, folder, document);
     }
 }
 
@@ -591,7 +571,13 @@ impl Extensions {
                                 egui::vec2(width - 260.0, 0.0),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| {
-                                    document_ui(ui, &m, document);
+                                    document_ui(
+                                        ui,
+                                        &mut self.detail_markdown_cache,
+                                        &folder,
+                                        &m,
+                                        document,
+                                    );
                                 },
                             );
                             ui.separator();
@@ -608,7 +594,7 @@ impl Extensions {
                             );
                         });
                     } else {
-                        document_ui(ui, &m, document);
+                        document_ui(ui, &mut self.detail_markdown_cache, &folder, &m, document);
                         ui.add_space(16.0);
                         ui.separator();
                         metadata_ui(

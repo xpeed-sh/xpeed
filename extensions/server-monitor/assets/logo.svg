@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title desc">
+  <title id="title">Server Monitor for XPEED</title>
+  <desc id="desc">A blue server with a live performance graph beside the Server Monitor name.</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#61b7ff"/>
+      <stop offset="1" stop-color="#3568df"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="156" height="156" rx="42" fill="#101827"/>
+  <rect x="39" y="43" width="102" height="38" rx="11" fill="none" stroke="url(#g)" stroke-width="9"/>
+  <rect x="39" y="99" width="102" height="38" rx="11" fill="none" stroke="url(#g)" stroke-width="9"/>
+  <circle cx="58" cy="62" r="6" fill="#eef6ff"/>
+  <circle cx="58" cy="118" r="6" fill="#eef6ff"/>
+  <path d="m76 119 13-12 13 8 20-31" fill="none" stroke="#eef6ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

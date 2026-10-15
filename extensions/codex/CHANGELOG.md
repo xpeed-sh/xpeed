@@ -4,6 +4,9 @@ La versión corresponde al adaptador, independiente de la versión de Xpeed y de
 
 ## Sin publicar
 
+## 0.3.2 — 2026-10-15
+
+- Logo vectorial y captura del flujo de conversación incluidos en el repositorio y en la ficha Markdown.
 - Documentación organizada para publicar el proyecto Git independiente, con VERSION y este changelog.
 
 ## 0.3.1 — 2026-10-09

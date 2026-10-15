@@ -2,6 +2,8 @@
 
 ## Sin publicar
 
+- Las fichas de extensiones renderizan Markdown completo e imágenes locales del repositorio. El catálogo conserva de forma acotada los logos y capturas citados antes de instalar.
+- Codex 0.3.2 y Monitor 0.1.3 incorporan logo SVG, capturas propias y README visual en sus repositorios independientes.
 - Catálogo único de extensiones disponibles mediante repositorios Git públicos. Codex y Monitor se publican y versionan de forma independiente.
 - El instalador deja de incluir copias locales de las extensiones; cada usuario las instala bajo demanda y Xpeed conserva las instaladas en su carpeta de datos.
 - Los proyectos exportados de extensiones incluyen CI independiente para Windows, Linux y macOS.

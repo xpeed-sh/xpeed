@@ -1,14 +1,18 @@
+![Codex para XPEED](assets/logo.svg)
+
 # Codex
 
-**Versión:** `0.3.1` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
+**Versión:** `0.3.2` · [Changelog](CHANGELOG.md) · [VERSION](VERSION)
 
-## Conversaciones guardadas (0.3.1)
+## Conversaciones guardadas
 
 Xpeed 0.9.1 guarda chats, títulos editables, borradores, modelo y preferencia de acceso en `%APPDATA%/xpeed/extensions/.chat-state/xpeed.codex.json`. Al abrir Codex recupera la cuenta existente de ChatGPT y pasa directamente al listado. Al enviar en una conversación guardada retoma su hilo original.
 
 Después de reiniciar selecciona las sesiones actuales de terminal. No se restauran tokens de autorización ni aprobaciones pendientes. El proveedor oficial sigue gestionando las credenciales. El uso de la cuenta aparece debajo del listado de conversaciones.
 
-Extensión opcional **0.3.1** para **XPEED 0.9.1+**. Codex se ejecuta en tu equipo con acceso oficial de ChatGPT desde el navegador. No pide API key ni instala Codex en servidores SSH. [English](README.md).
+Extensión opcional **0.3.2** para **XPEED 0.9.1+**. Codex se ejecuta en tu equipo con acceso oficial de ChatGPT desde el navegador. No pide API key ni instala Codex en servidores SSH. [English](README.md).
+
+![Codex trabajando con una terminal SSH seleccionada en XPEED](assets/screenshots/conversation.png)
 
 ## Instalar y usar
 
@@ -59,7 +63,7 @@ scripts/test-codex-extension.py verifica el adaptador con fixture explícita y e
 
 Referencias oficiales: [Codex App Server](https://learn.chatgpt.com/docs/app-server) y [configuración](https://learn.chatgpt.com/docs/config-file/config-reference). Esquema generado con `codex app-server generate-json-schema --experimental`.
 
-## Codex 0.3.1: consola visible y panel propio
+## Consola visible y panel propio
 
 Requiere Xpeed 0.9.1+. Abre **Extensiones → Codex**: ahora tiene su propio panel, sin el contenedor de IA ni la pestaña de Ollama. Selecciona explícitamente las sesiones destino y autoriza los comandos antes de ejecutarlos. `xpeed_exec` escribe y ejecuta en la terminal real; `cd`, las variables y los entornos activados se conservan. `xpeed_read_terminal` lee la pantalla visible de una sesión autorizada. La salida de terminal es información no confiable y no concede permisos.
 
