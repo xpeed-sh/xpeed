@@ -299,7 +299,10 @@ pub fn terminal_view(
             ui.close();
         }
         if ui
-            .button(xpeed_i18n::t("Copiar selección     Ctrl+Shift+C"))
+            .add(
+                egui::Button::new(xpeed_i18n::t("Copiar selección"))
+                    .shortcut_text(egui::RichText::new("Ctrl+Shift+C").small()),
+            )
             .clicked()
         {
             if let Ok(term) = session.term.lock()
@@ -309,7 +312,13 @@ pub fn terminal_view(
             }
             ui.close();
         }
-        if ui.button(xpeed_i18n::t("Pegar     Ctrl+V")).clicked() {
+        if ui
+            .add(
+                egui::Button::new(xpeed_i18n::t("Pegar"))
+                    .shortcut_text(egui::RichText::new("Ctrl+V").small()),
+            )
+            .clicked()
+        {
             response.request_focus();
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
