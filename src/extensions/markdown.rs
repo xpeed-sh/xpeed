@@ -1,7 +1,7 @@
 //! Shared response typography. Images are not fetched and local links copy their path.
 use eframe::egui::{self, RichText};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
-use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
 use std::path::Path;
 
@@ -37,7 +37,24 @@ fn code_blocks(text: &str) -> Vec<(Range<usize>, String, String)> {
     blocks
 }
 
-fn prose(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
+fn table_blocks(text: &str) -> Vec<Range<usize>> {
+    let mut blocks = Vec::new();
+    let mut start = None;
+    for (event, range) in Parser::new_ext(text, Options::ENABLE_TABLES).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Table(_)) => start = Some(range.start),
+            Event::End(TagEnd::Table) => {
+                if let Some(start) = start.take() {
+                    blocks.push(start..range.end);
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+fn prose_fragment(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
     if text.trim().is_empty() {
         return;
     }
@@ -56,6 +73,24 @@ fn prose(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
             ui.ctx().copy_text(path.clone());
         }
     }
+}
+
+fn prose(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
+    let mut end = 0;
+    for (index, range) in table_blocks(text).into_iter().enumerate() {
+        prose_fragment(ui, cache, &text[end..range.start]);
+        let width = ui.available_width().max(1.0);
+        ui.push_id(("responsive_table", index), |ui| {
+            egui::ScrollArea::horizontal()
+                .auto_shrink([false, true])
+                .max_width(width)
+                .show(ui, |ui| {
+                    prose_fragment(ui, cache, &text[range.clone()]);
+                });
+        });
+        end = range.end;
+    }
+    prose_fragment(ui, cache, &text[end..]);
 }
 
 pub(super) fn show(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
@@ -154,5 +189,15 @@ mod tests {
         assert_eq!(blocks[0].2, "echo caf\u{e9}\n");
         assert_eq!(blocks[1].2, "print('ok')");
         assert!(text[blocks[0].0.end..blocks[1].0.start].contains("Despu\u{e9}s"));
+    }
+
+    #[test]
+    fn tables_are_detected_as_independent_responsive_blocks() {
+        let text = "Antes.\n\n| Nombre | Descripción extensa |\n| --- | --- |\n| uno | contenido |\n\nDespués.";
+        let blocks = table_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert!(text[blocks[0].clone()].starts_with("| Nombre"));
+        assert!(text[blocks[0].clone()].contains("contenido"));
+        assert!(!text[blocks[0].clone()].contains("Después"));
     }
 }

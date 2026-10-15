@@ -272,6 +272,7 @@
   "OpenSSH terminó con código {}. Revisa el último mensaje de la terminal para conocer el motivo.": "OpenSSH exited with code {}. Check the last terminal message for the reason.",
   "No se pudo redimensionar: {e}": "Could not resize: {e}",
   "Copiar selección     Ctrl+Shift+C": "Copy selection     Ctrl+Shift+C",
+  "Pegar     Ctrl+V": "Paste     Ctrl+V",
   "Ir al final": "Scroll to bottom",
   "Procesos que más consumen": "Top resource-consuming processes",
   "Buscar proceso o PID": "Search process or PID",

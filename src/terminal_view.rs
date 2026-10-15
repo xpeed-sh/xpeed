@@ -309,6 +309,12 @@ pub fn terminal_view(
             }
             ui.close();
         }
+        if ui.button(xpeed_i18n::t("Pegar     Ctrl+V")).clicked() {
+            response.request_focus();
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            ui.close();
+        }
         if ui.button(xpeed_i18n::t("Ir al final")).clicked() {
             session.bottom();
             ui.close();

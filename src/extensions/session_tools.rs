@@ -106,8 +106,18 @@ impl Bridge {
         {
             return Err("A selected session is disconnected.".into());
         }
-        if self.scope != self.selected || self.token.is_empty() {
+        let session_reconnected = self.selected.iter().any(|id| {
+            self.revoked.contains(id)
+                || targets
+                    .get(id)
+                    .is_some_and(|target| self.bindings.get(id) != Some(&target.incarnation))
+        });
+        if self.scope != self.selected || self.token.is_empty() || session_reconnected {
             self.stop();
+            if session_reconnected {
+                self.jobs
+                    .retain(|_, job| !self.revoked.contains(&job.session));
+            }
             self.scope = self.selected.clone();
             self.revoked.clear();
             self.token = format!("scope-{:032x}", rand::random::<u128>());
@@ -117,9 +127,6 @@ impl Bridge {
                 .filter_map(|id| targets.get(id).map(|t| (*id, t.incarnation)))
                 .collect();
             self.proposals.clear();
-        }
-        if self.scope.iter().any(|id| self.revoked.contains(id)) {
-            return Err("A session disconnected during this conversation. Start a new conversation before reconnecting.".into());
         }
         self.task_approved = self.approve_task;
         Ok(
@@ -1018,7 +1025,7 @@ mod tests {
         }
     }
     #[test]
-    fn scope_rejects_unselected_sessions_forged_tokens_and_reconnected_targets() {
+    fn scope_rejects_unselected_sessions_and_forged_tokens_but_rebinds_reconnected_targets() {
         let (mut b, mut t, p) = setup();
         call(
             &mut b,
@@ -1033,9 +1040,20 @@ mod tests {
             &t,
         );
         assert!(b.take_replies()[0].get("error").is_some());
+        let old_token = b.token.clone();
         t.get_mut(&1).unwrap().incarnation = Instant::now();
         b.revoke_disconnected(&t);
-        assert!(b.begin(&t).is_err());
+        call(
+            &mut b,
+            &t,
+            "revoked",
+            "xpeed_list_directory",
+            json!({"sessionId":1,"path":p}),
+        );
+        assert!(b.take_replies()[0].get("error").is_some());
+        b.begin(&t).unwrap();
+        assert_ne!(b.token, old_token);
+        assert!(b.jobs.is_empty());
         call(
             &mut b,
             &t,
@@ -1043,7 +1061,8 @@ mod tests {
             "xpeed_list_directory",
             json!({"sessionId":1,"path":p}),
         );
-        assert!(b.take_replies()[0].get("error").is_some());
+        let replies = wait(&mut b);
+        assert!(replies[0].get("result").is_some());
         std::fs::remove_dir(p).unwrap();
     }
     #[test]
