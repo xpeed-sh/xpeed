@@ -2,6 +2,7 @@
 
 ## Sin publicar
 
+- `Xpeed.cmd` compara la compilación con el código fuente y recompila en modo release cuando detecta cambios, evitando abrir un ejecutable de desarrollo desactualizado.
 - Las tablas Markdown de Codex conservan el ancho del panel y desplazan solamente la tabla cuando sus columnas no caben. Las sesiones seleccionadas pueden reconectarse y continuar la misma conversación con una autorización renovada; las tareas y permisos de la conexión anterior se invalidan. La terminal incorpora Pegar en su menú contextual.
 - El catálogo público pasa a `extensions.json` en la raíz. El repositorio principal y las entregas dejan de versionar la carpeta `extensions`; los proyectos independientes pueden clonarse allí para desarrollo local, mientras las instalaciones se guardan en los datos de cada usuario.
 - Conexiones SSH acepta direcciones pegadas con espacios o caracteres invisibles en los extremos, limpia esos valores antes de invocar OpenSSH y oculta el error anterior al corregir el host.
