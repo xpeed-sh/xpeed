@@ -784,7 +784,7 @@ impl Extensions {
                     xpeed_i18n::t("Se conserva el catálogo disponible; algunas conexiones fallaron")
                 }
                 .into();
-                self.error = (!errors.is_empty()).then(|| errors.join("\n"));
+                self.error = None;
             }
             Ok(Completion::Repository(entry)) => {
                 let id = entry.item.id.clone();

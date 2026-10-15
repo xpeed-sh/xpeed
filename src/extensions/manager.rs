@@ -94,7 +94,6 @@ fn row(
     name: &str,
     description: &str,
     publisher: &str,
-    state: &str,
     image: Option<&egui::TextureHandle>,
 ) -> bool {
     let width = ui.available_width();
@@ -109,10 +108,7 @@ fn row(
                     ui.set_max_width((width - 72.0).max(32.0));
                     ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
                     ui.add(egui::Label::new(RichText::new(description).weak()).truncate());
-                    ui.add(
-                        egui::Label::new(RichText::new(format!("{publisher} · {state}")).small())
-                            .truncate(),
-                    );
+                    ui.add(egui::Label::new(RichText::new(publisher).small()).truncate());
                 });
             });
         })
@@ -238,33 +234,20 @@ impl Extensions {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         let query = self.manager_query.to_lowercase();
-        let installed: Vec<_> = self
-            .runtimes
-            .values()
-            .filter(|r| {
-                format!(
-                    "{} {} {}",
-                    r.manifest.name(),
-                    r.manifest.description(),
-                    r.manifest.publisher
-                )
-                .to_lowercase()
-                .contains(&query)
-            })
-            .map(|r| (r.manifest.clone(), r.enabled, r.folder.clone()))
-            .collect();
         let catalog: Vec<_> = self
             .catalog
             .iter()
             .map(|(c, folder)| {
-                (
-                    c.clone(),
-                    Manifest::read(folder).ok(),
-                    self.runtimes.contains_key(&c.id),
-                    folder.clone(),
-                )
+                let installed = self.runtimes.get(&c.id);
+                let manifest = installed
+                    .map(|runtime| runtime.manifest.clone())
+                    .or_else(|| Manifest::read(folder).ok());
+                let assets = installed
+                    .map(|runtime| runtime.folder.clone())
+                    .unwrap_or_else(|| folder.clone());
+                (c.clone(), manifest, assets)
             })
-            .filter(|(c, m, _, _)| {
+            .filter(|(c, m, _)| {
                 format!(
                     "{} {}",
                     m.as_ref().map(|m| m.name()).unwrap_or(&c.name),
@@ -276,97 +259,33 @@ impl Extensions {
                 .contains(&query)
             })
             .collect();
-        let total = (ui.available_height() - 8.0).max(150.0);
-        let top = total * self.manager_split;
-        ui.allocate_ui(egui::vec2(ui.available_width(), top), |ui| {
-            ui.set_min_height(top);
-            ui.horizontal(|ui| {
-                ui.strong(xpeed_i18n::t("INSTALADAS"));
-                ui.weak(installed.len().to_string());
-            });
-            egui::ScrollArea::vertical()
-                .id_salt("installed_extensions")
-                .max_height((top - 28.0).max(20.0))
-                .show(ui, |ui| {
-                    if installed.is_empty() {
-                        ui.weak(xpeed_i18n::t(
-                            "No hay extensiones instaladas que coincidan.",
-                        ));
-                    }
-                    for (m, enabled, folder) in &installed {
-                        let image = self.image(m, folder, ui.ctx());
-                        if row(
-                            ui,
-                            &m.id,
-                            m.name(),
-                            m.description(),
-                            &m.publisher,
-                            if *enabled {
-                                xpeed_i18n::t("Activada")
-                            } else {
-                                xpeed_i18n::t("Desactivada")
-                            },
-                            image.as_ref(),
-                        ) {
-                            self.details_requested = Some(key(&m.id));
-                        }
-                    }
-                });
+        ui.horizontal(|ui| {
+            ui.strong(xpeed_i18n::t("EXTENSIONES"));
+            ui.weak(catalog.len().to_string());
         });
-        let (divider, drag) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), egui::Sense::drag());
-        ui.painter().hline(
-            divider.x_range(),
-            divider.center().y,
-            egui::Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color),
-        );
-        if drag.hovered() || drag.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-        }
-        if drag.dragged() {
-            self.manager_split =
-                (self.manager_split + ui.input(|i| i.pointer.delta().y) / total).clamp(0.2, 0.8);
-        }
-        let bottom = (total - top - 6.0).max(30.0);
-        ui.allocate_ui(egui::vec2(ui.available_width(), bottom), |ui| {
-            ui.set_min_height(bottom);
-            ui.horizontal(|ui| {
-                ui.strong(xpeed_i18n::t("CATÁLOGO"));
-                ui.weak(catalog.len().to_string());
+        egui::ScrollArea::vertical()
+            .id_salt("catalog_extensions")
+            .show(ui, |ui| {
+                if catalog.is_empty() {
+                    ui.weak(xpeed_i18n::t("No hay extensiones que coincidan."));
+                }
+                for (c, m, folder) in &catalog {
+                    let image = m.as_ref().and_then(|m| self.image(m, folder, ui.ctx()));
+                    let publisher = m.as_ref().map(|m| m.publisher.as_str()).unwrap_or("XPEED");
+                    if row(
+                        ui,
+                        &c.id,
+                        m.as_ref().map(|m| m.name()).unwrap_or(&c.name),
+                        m.as_ref()
+                            .map(|m| m.description())
+                            .unwrap_or(&c.description),
+                        publisher,
+                        image.as_ref(),
+                    ) {
+                        self.details_requested = Some(key(&c.id));
+                    }
+                }
             });
-            egui::ScrollArea::vertical()
-                .id_salt("catalog_extensions")
-                .max_height((bottom - 28.0).max(20.0))
-                .show(ui, |ui| {
-                    if catalog.is_empty() {
-                        ui.weak(xpeed_i18n::t("No hay extensiones que coincidan."));
-                    }
-                    for (c, m, installed, folder) in &catalog {
-                        let image = m.as_ref().and_then(|m| self.image(m, folder, ui.ctx()));
-                        let publisher = m
-                            .as_ref()
-                            .map(|m| m.publisher.as_str())
-                            .unwrap_or(xpeed_i18n::t("Paquete local"));
-                        if row(
-                            ui,
-                            &c.id,
-                            m.as_ref().map(|m| m.name()).unwrap_or(&c.name),
-                            m.as_ref()
-                                .map(|m| m.description())
-                                .unwrap_or(&c.description),
-                            publisher,
-                            if *installed {
-                                xpeed_i18n::t("Instalada")
-                            } else {
-                                xpeed_i18n::t("Disponible")
-                            },
-                            image.as_ref(),
-                        ) {
-                            self.details_requested = Some(key(&c.id));
-                        }
-                    }
-                });
-        });
     }
 
     pub fn details_ui(&mut self, ui: &mut egui::Ui, detail: u64) {
