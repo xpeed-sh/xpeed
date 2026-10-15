@@ -63,6 +63,30 @@ foreach ($entry in @(
     $manifest | Add-Member -NotePropertyName icon -NotePropertyValue 'assets/icon.png' -Force
     [IO.File]::WriteAllText((Join-Path $destination 'extension.json'), ($manifest | ConvertTo-Json -Depth 16), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $destination '.gitignore'), "/target/`n/.tools/`n.env`n.env.*`n!.env.example`n*.log`n*.tmp`n# bin/ is intentionally tracked for direct installation from Git.`n", [Text.UTF8Encoding]::new($false))
+    $workflowDirectory = Join-Path $destination '.github/workflows'
+    New-Item -ItemType Directory -Force -Path $workflowDirectory | Out-Null
+    $workflow = @'
+name: Check extension
+on: [push, pull_request]
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+'@
+    [IO.File]::WriteAllText((Join-Path $workflowDirectory 'check.yml'), $workflow, [Text.UTF8Encoding]::new($false))
     Write-Output "Proyecto preparado: $destination"
 }
 Write-Output 'No se han creado repositorios ni publicado archivos. Cada carpeta contiene el proyecto y su ejecutable Windows para subirlos a su propio Git.'

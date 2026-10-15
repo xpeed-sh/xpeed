@@ -1,5 +1,11 @@
 # Changelog
 
+## Sin publicar
+
+- Catálogo único de extensiones disponibles mediante repositorios Git públicos. Codex y Monitor se publican y versionan de forma independiente.
+- El instalador deja de incluir copias locales de las extensiones; cada usuario las instala bajo demanda y Xpeed conserva las instaladas en su carpeta de datos.
+- Los proyectos exportados de extensiones incluyen CI independiente para Windows, Linux y macOS.
+
 ## 0.10.8 - 2026-10-14
 
 - Selector de subida con diálogo nativo del sistema para archivos o carpetas, seguido de una ventana compacta, movible y redimensionable para revisar la selección. Conserva la estructura de las carpetas al subirlas.
@@ -187,8 +193,6 @@
 - Validación: 68 pruebas del workspace y Clippy sin advertencias; abrir la misma ficha no duplica pestañas ni reinicia las terminales.
 
 Cambios de Xpeed por versión. El proyecto sigue en desarrollo; las versiones 0.x pueden cambiar funcionalidades y formatos de configuración.
-
-## Sin publicar
 
 ## 0.6.16 — 2026-10-08
 

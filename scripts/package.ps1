@@ -46,12 +46,11 @@ $technicalDocs = Join-Path $distribution 'docs'
 New-Item -ItemType Directory -Force -Path $technicalDocs | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs') -File -Filter '*.md' | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $technicalDocs -Force }
 $catalogDirectory = Join-Path $distribution 'extensions'
+if (Test-Path -LiteralPath $catalogDirectory) {
+    Remove-Item -LiteralPath $catalogDirectory -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $catalogDirectory | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions\catalog.json') -Destination $catalogDirectory -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions\catalog.git.example.json') -Destination $catalogDirectory -Force
-$monitorDocs = Join-Path $catalogDirectory 'server-monitor'
-New-Item -ItemType Directory -Force -Path $monitorDocs | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot 'extensions\server-monitor\README.md') -Destination $monitorDocs -Force
 $additionalNotices = Join-Path $distribution 'licenses\additional'
 New-Item -ItemType Directory -Force -Path $additionalNotices | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'assets\licenses') -File | ForEach-Object {
@@ -94,6 +93,9 @@ foreach ($package in $metadata.packages) {
 }
 $dependencyList | Set-Content -LiteralPath (Join-Path $distribution 'DEPENDENCIES.txt') -Encoding UTF8
 $portableDirectory = Join-Path $distribution "portable\Xpeed-$appVersion"
+if (Test-Path -LiteralPath $portableDirectory) {
+    Remove-Item -LiteralPath $portableDirectory -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $portableDirectory | Out-Null
 Copy-Item -LiteralPath $releaseSource -Destination (Join-Path $portableDirectory 'Xpeed.exe') -Force
 foreach ($document in @('LICENSE', 'THIRD_PARTY.md', 'DEPENDENCIES.txt', 'README.md', 'CHANGELOG.md', 'VERSION', 'CREDITS.md', 'CONTRIBUTING.md')) {

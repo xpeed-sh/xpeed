@@ -2,7 +2,7 @@
 
 ## Instalador: compartir un solo .exe
 
-Comparte `dist/installer/Xpeed-Setup-0.10.8-x64.exe`. Instala Xpeed y sus paquetes opcionales en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye desinstalador, interfaz en inglés y español, documentación y licencias. No solicita permisos de administrador.
+Comparte `dist/installer/Xpeed-Setup-0.10.8-x64.exe`. Instala Xpeed en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye el catálogo de extensiones, desinstalador, interfaz en inglés y español, documentación y licencias. Las extensiones se instalan después desde sus repositorios Git públicos. No solicita permisos de administrador.
 
 Para generar el instalador instala [Inno Setup 6](https://jrsoftware.org/isdl.php) en el equipo de desarrollo y ejecuta:
 
@@ -14,26 +14,25 @@ Si ya preparaste la carpeta portátil, usa `.\scripts\package-installer.ps1 -Ski
 
 Las actualizaciones usan la misma identidad de instalación. El desinstalador conserva las cuentas, conexiones y chats en `%APPDATA%\xpeed`. Los runtimes de proveedores, como Codex, siguen siendo requisitos opcionales independientes.
 
-La entrega actual está en `dist/Xpeed-0.10.8.exe`. La carpeta `dist/portable/Xpeed-0.10.8` reúne `Xpeed.exe`, documentación, licencias y los paquetes opcionales disponibles: puedes compartirla directamente. Es una aplicación portátil para Windows x64: no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
+La entrega actual está en `dist/Xpeed-0.10.8.exe`. La carpeta `dist/portable/Xpeed-0.10.8` reúne `Xpeed.exe`, documentación, licencias y el catálogo Git: puedes compartirla directamente. Es una aplicación portátil para Windows x64; no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
 
 ## Generar otra entrega
 
 Abre PowerShell en la carpeta del proyecto:
 
 ```powershell
-.\scripts\package-extension.ps1
 .\scripts\package.ps1
 .\scripts\prepare-git-repositories.ps1 -SkipBuild
 ```
 
-El primer comando prepara el paquete independiente de Codex. El segundo compila la aplicación en modo release y copia el ejecutable, documentación, licencias y paquetes opcionales a la carpeta portátil de `dist`. El tercero prepara los repositorios de extensiones para publicarlos por separado. Usa `-SkipBuild` en los scripts de empaquetado solo si ya compilaste esos binarios.
+El primer comando compila la aplicación y prepara la carpeta portátil con su catálogo. El segundo regenera los proyectos independientes de Codex y Monitor para sus repositorios. Usa `-SkipBuild` únicamente si los binarios correspondientes ya están compilados.
 
 Para compilar todo de una vez:
 
 ```powershell
 cargo build --workspace --release --locked
-.\scripts\package-extension.ps1 -SkipBuild
 .\scripts\package.ps1 -SkipBuild
+.\scripts\prepare-git-repositories.ps1 -SkipBuild
 ```
 
 En este equipo, los scripts detectan Rust en `.tools` y MinGW en `C:\msys64\mingw64\bin`. En otro equipo de desarrollo instala Rust y un compilador compatible (MSVC con Visual Studio Build Tools o GNU/MinGW); para los usuarios finales no son necesarios.
@@ -41,8 +40,8 @@ En este equipo, los scripts detectan Rust en `.tools` y MinGW en `C:\msys64\ming
 ## Qué compartir
 
 - `Xpeed-0.10.8.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
-- Si quieres distribuir las extensiones locales, incluye `extensions/catalog.json` y `extensions/packages` manteniendo esa estructura junto al ejecutable. La app principal funciona sin Codex instalado.
-- Para la distribución por Git, publica `dist/git-repositories/xpeed.codex` como un repositorio de extensión y conecta su enlace desde Extensiones → Git. El usuario instala y abre Codex desde allí.
+- `extensions/catalog.json` contiene las extensiones disponibles y sus repositorios. Las extensiones instaladas pertenecen a cada usuario y no se copian en la distribución.
+- Codex y Monitor se instalan desde sus repositorios públicos mediante el catálogo incluido. La aplicación principal funciona sin extensiones instaladas.
 
 Cada persona inicia sesión en su propia cuenta de ChatGPT. Codex necesita un runtime oficial compatible instalado en ese equipo; Xpeed busca el ejecutable y permite configurar su ruta desde la ficha de la extensión. Las conexiones SSH requieren OpenSSH Client disponible en Windows.
 

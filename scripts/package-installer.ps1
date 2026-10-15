@@ -5,7 +5,6 @@ Set-Location -LiteralPath $projectRoot
 $appVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
 if ($appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION debe tener el formato x.y.z.' }
 if (-not $SkipBuild) {
-    & (Join-Path $PSScriptRoot 'package-extension.ps1')
     & (Join-Path $PSScriptRoot 'package.ps1')
 }
 $payloadDirectory = Join-Path $projectRoot "dist\portable\Xpeed-$appVersion"
