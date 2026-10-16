@@ -1,7 +1,8 @@
 # Changelog
 
-## Sin publicar
+## 0.10.9 - 2026-10-15
 
+- La tarjeta del catálogo de extensiones ocupa toda la altura disponible del panel lateral.
 - El panel de extensiones presenta un catálogo único, sin duplicar las instaladas ni mostrar estados de instalación en cada fila; ese estado y sus acciones permanecen en la ficha individual. Un fallo parcial de Git conserva y muestra el catálogo local sin ocupar el panel con el error técnico.
 - `Xpeed.cmd` compara la compilación con el código fuente y recompila en modo release cuando detecta cambios, evitando abrir un ejecutable de desarrollo desactualizado.
 - Las tablas Markdown de Codex conservan el ancho del panel y desplazan solamente la tabla cuando sus columnas no caben. Las sesiones seleccionadas pueden reconectarse y continuar la misma conversación con una autorización renovada; las tareas y permisos de la conexión anterior se invalidan. La terminal incorpora Pegar en su menú contextual.

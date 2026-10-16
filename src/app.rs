@@ -2109,6 +2109,7 @@ impl Xpeed {
                 if self.sidebar_view == SidebarView::Sessions { self.session_sidebar_ui(ui); return; }
                 if self.sidebar_view == SidebarView::Extensions {
                     egui::Frame::new().fill(p.panel).corner_radius(10).stroke(Stroke::new(1.0_f32,p.border)).inner_margin(14).show(ui, |ui| {
+                        ui.set_min_height(ui.available_height());
                         self.extensions.manager_ui(ui);
                         self.extension_sections(ui, crate::extensions::ViewLocation::Extensions);
                     }); return;
