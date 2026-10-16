@@ -153,66 +153,71 @@ impl Extensions {
         ui.horizontal(|ui| {
             ui.heading(xpeed_i18n::t("Extensiones"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button("Git", |ui| {
-                    ui.label(xpeed_i18n::t("Conectar repositorio de extensión"));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.git.repository_input)
-                            .hint_text("https://github.com/autor/extensión"),
-                    );
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.git.reference_input)
-                            .hint_text(xpeed_i18n::t("Rama o etiqueta (opcional)")),
-                    );
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.git.path_input)
-                            .hint_text(xpeed_i18n::t("Subcarpeta de extensión (opcional)")),
-                    );
-                    if ui
-                        .add_enabled(
-                            !self.git.busy(),
-                            egui::Button::new(xpeed_i18n::t("Conectar repositorio")),
-                        )
-                        .clicked()
-                    {
-                        self.connect_repository(ui.ctx());
-                        ui.close();
-                    }
-                    ui.separator();
-                    ui.label(xpeed_i18n::t("Conectar catálogo de Xpeed"));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.git.catalog_input)
-                            .hint_text("https://github.com/xpeed-sh/xpeed"),
-                    );
-                    ui.weak(xpeed_i18n::t("Lee extensions.json del repositorio."));
-                    if ui
-                        .add_enabled(
-                            !self.git.busy(),
-                            egui::Button::new(xpeed_i18n::t("Conectar catálogo")),
-                        )
-                        .clicked()
-                    {
-                        self.connect_catalog(ui.ctx());
-                        ui.close();
-                    }
-                    if ui
-                        .add_enabled(
-                            !self.git.busy(),
-                            egui::Button::new(xpeed_i18n::t("Actualizar catálogo Git")),
-                        )
-                        .clicked()
-                    {
-                        self.refresh_git(ui.ctx());
-                        ui.close();
-                    }
-                    ui.separator();
-                    ui.label(xpeed_i18n::t("Instalar desde una carpeta"));
-                    ui.text_edit_singleline(&mut self.install_path);
-                    if ui.button(xpeed_i18n::t("Instalar paquete")).clicked() {
-                        let path = PathBuf::from(self.install_path.trim());
-                        self.review_install(&path);
-                        ui.close();
-                    }
-                });
+                egui::containers::menu::MenuButton::new("Git")
+                    .config(
+                        egui::containers::menu::MenuConfig::new()
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| {
+                        ui.label(xpeed_i18n::t("Conectar repositorio de extensión"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.git.repository_input)
+                                .hint_text("https://github.com/autor/extensión"),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.git.reference_input)
+                                .hint_text(xpeed_i18n::t("Rama o etiqueta (opcional)")),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.git.path_input)
+                                .hint_text(xpeed_i18n::t("Subcarpeta de extensión (opcional)")),
+                        );
+                        if ui
+                            .add_enabled(
+                                !self.git.busy(),
+                                egui::Button::new(xpeed_i18n::t("Conectar repositorio")),
+                            )
+                            .clicked()
+                        {
+                            self.connect_repository(ui.ctx());
+                            ui.close();
+                        }
+                        ui.separator();
+                        ui.label(xpeed_i18n::t("Conectar catálogo de Xpeed"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.git.catalog_input)
+                                .hint_text("https://github.com/xpeed-sh/xpeed"),
+                        );
+                        ui.weak(xpeed_i18n::t("Lee extensions.json del repositorio."));
+                        if ui
+                            .add_enabled(
+                                !self.git.busy(),
+                                egui::Button::new(xpeed_i18n::t("Conectar catálogo")),
+                            )
+                            .clicked()
+                        {
+                            self.connect_catalog(ui.ctx());
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.git.busy(),
+                                egui::Button::new(xpeed_i18n::t("Actualizar catálogo Git")),
+                            )
+                            .clicked()
+                        {
+                            self.refresh_git(ui.ctx());
+                            ui.close();
+                        }
+                        ui.separator();
+                        ui.label(xpeed_i18n::t("Instalar desde una carpeta"));
+                        ui.text_edit_singleline(&mut self.install_path);
+                        if ui.button(xpeed_i18n::t("Instalar paquete")).clicked() {
+                            let path = PathBuf::from(self.install_path.trim());
+                            self.review_install(&path);
+                            ui.close();
+                        }
+                    });
             });
         });
         ui.add_space(8.0);
