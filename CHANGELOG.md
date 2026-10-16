@@ -2,6 +2,7 @@
 
 ## 0.10.9 - 2026-10-15
 
+- Corregida la instalación y actualización desde Git en Windows: el proyecto descargado se conserva hasta confirmar o cancelar el diálogo de permisos.
 - El menú Git de Extensiones permanece abierto al editar sus campos y se cierra al hacer clic fuera o completar una acción.
 - La tarjeta del catálogo de extensiones ocupa toda la altura disponible del panel lateral.
 - El panel de extensiones presenta un catálogo único, sin duplicar las instaladas ni mostrar estados de instalación en cada fila; ese estado y sus acciones permanecen en la ficha individual. Un fallo parcial de Git conserva y muestra el catálogo local sin ocupar el panel con el error técnico.

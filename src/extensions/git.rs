@@ -279,6 +279,53 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn downloaded_package_survives_until_install_review_finishes() {
+        let root = temp();
+        let cache = root.join("cache");
+        let job = cache.join("jobs").join("pending-review");
+        let package = job.join("repository");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        let mut m = manifest();
+        m.icon = None;
+        std::fs::write(
+            package.join("extension.json"),
+            serde_json::to_vec(&m).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            package.join(m.entrypoints.get(std::env::consts::OS).unwrap()),
+            b"fixture, never executed",
+        )
+        .unwrap();
+        let checkout = Checkout {
+            job: job.clone(),
+            cache,
+            package: package.clone(),
+        };
+        let entry = Entry {
+            item: CatalogItem {
+                id: m.id.clone(),
+                name: m.name.clone(),
+                ..Default::default()
+            },
+            folder: root.join("metadata"),
+        };
+        let (sender, incoming) = mpsc::channel();
+        sender
+            .send(Ok(Completion::Checkout(entry, checkout)))
+            .unwrap();
+        let mut extensions = Extensions::new(&root, true);
+        extensions.git.incoming = Some(incoming);
+        extensions.poll_git(&egui::Context::default());
+        assert_eq!(extensions.install_review.as_ref().unwrap().0, package);
+        assert!(job.exists());
+        assert!(extensions.pending_checkout.is_some());
+        extensions.install_review = None;
+        extensions.pending_checkout = None;
+        assert!(!job.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn official_catalog_sources_migrate_to_the_root_index() {
         let mut source = CatalogSource {
             repository: "https://github.com/xpeed-sh/xpeed".into(),
@@ -797,10 +844,12 @@ impl Extensions {
                 self.error = None;
             }
             Ok(Completion::Checkout(entry, checkout)) => {
-                self.review_install(&checkout.package);
+                let package = checkout.package.clone();
+                self.review_install(&package);
                 if self.error.is_none() {
                     self.merge_git_entry(entry);
                     self.git.status = xpeed_i18n::t("Extensión instalada desde Git").into();
+                    self.pending_checkout = Some(checkout);
                 } else {
                     self.git.status.clear();
                 }
