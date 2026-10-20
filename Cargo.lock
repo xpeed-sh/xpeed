@@ -5106,7 +5106,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xpeed"
-version = "0.10.9"
+version = "0.11.0"
 dependencies = [
  "alacritty_terminal",
  "chrono",
@@ -5127,6 +5127,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "windows-sys 0.60.2",
  "xpeed-i18n",
  "zeroize",

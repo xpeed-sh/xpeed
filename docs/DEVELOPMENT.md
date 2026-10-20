@@ -55,16 +55,16 @@ La interfaz usa egui/eframe con OpenGL y egui_tiles para las divisiones y el arr
 
 Los proyectos de extensiones no forman parte del repositorio principal. `extensions/` está ignorada para que puedas clonar allí `extension-codex`, `extension-server-monitor` y futuras extensiones sin duplicarlas en Git. El núcleo conserva únicamente manifiestos de prueba reducidos en `src/extensions/fixtures/`.
 
-Los archivos `settings.json`, `connections.json`, `commands.json` y `workspace.json` se guardan en la carpeta de configuración del usuario, dentro de `xpeed`. En Windows normalmente es `%APPDATA%\xpeed`. Para comenzar con una distribución nueva usa `Xpeed-0.10.6.exe --fresh-layout`.
+Los archivos `settings.json`, `connections.json`, `commands.json` y `workspace.json` se guardan en la carpeta de configuración del usuario, dentro de `xpeed`. En Windows normalmente es `%APPDATA%\xpeed`. Para comenzar con una distribución nueva usa `Xpeed.exe --fresh-layout`.
 
 Quedan pendientes protocolo de ratón para aplicaciones TUI, validación amplia de tipografía compleja/emoji/IME y empaquetadores Linux/macOS. Las pruebas verifican inicio sin procesos, consolas, divisiones, arrastre, captura de comandos, intercambio SFTP, acceso SSH por contraseña y reutilización del acceso, almacenamiento/borrado en el almacén de Windows y chat HTTP con servidores/protocolos de prueba. No validan tus servidores externos ni una respuesta de un modelo de IA real. Las comparativas de velocidad requieren mediciones con cargas representativas.
 
 Para capturas del renderizado nativo:
 
 ```powershell
-dist\Xpeed-0.10.6.exe --capture artifacts\dark.png
-dist\Xpeed-0.10.6.exe --capture artifacts\light.png --light
-dist\Xpeed-0.10.6.exe --capture artifacts\settings.png --show-settings
+target\release\xpeed.exe --capture artifacts\dark.png
+target\release\xpeed.exe --capture artifacts\light.png --light
+target\release\xpeed.exe --capture artifacts\settings.png --show-settings
 ```
 
 La carpeta de salida debe existir. `--theme 0`, `1` o `2` selecciona un tema del modo activo; las capturas usan preferencias predeterminadas y no cargan perfiles personales ni guardan cambios.

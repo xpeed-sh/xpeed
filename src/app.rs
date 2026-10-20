@@ -2,7 +2,7 @@ use crate::{
     assistant::Assistant,
     connections::{Connection, ConnectionStore, SshConfig, Target},
     history::History,
-    palette::{Mode, Palette},
+    palette::{Density, Mode, Palette},
     settings::Settings,
     sftp::RemoteExplorer,
     terminal::{Profile, Session},
@@ -404,7 +404,7 @@ impl Xpeed {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(
             xpeed_i18n::t("Xpeed — Conexiones y terminales").into(),
         ));
-        settings.palette().apply(ctx);
+        settings.palette().apply(ctx, settings.density);
         let mut app = Self {
             window_size: crate::window_size::WindowSize::default(),
             tree: workspace::default_layout(&[], false),
@@ -1035,7 +1035,7 @@ impl Xpeed {
     }
     fn save_settings(&mut self, ctx: &egui::Context) {
         self.apply_preferences();
-        self.palette().apply(ctx);
+        self.palette().apply(ctx, self.settings.density);
         self.log(xpeed_i18n::t("Ajustes actualizados").into());
         if !self.ephemeral
             && let Err(error) = self.settings.save()
@@ -1688,6 +1688,13 @@ impl Xpeed {
                     ui.add_space(space - 36.0);
                 }
                 let settings_button = icon_button(ui, Icon::Settings, p);
+                if self.updates.available() {
+                    ui.painter().circle_filled(
+                        settings_button.rect.right_top() + Vec2::new(-5.0, 5.0),
+                        3.5,
+                        p.accent,
+                    );
+                }
                 if self.settings.sidebar && self.sidebar_view == SidebarView::Settings {
                     ui.painter().rect_filled(settings_button.rect, 6, p.raised);
                     draw_icon(
@@ -1705,10 +1712,12 @@ impl Xpeed {
                         p.accent,
                     );
                 }
-                if settings_button
-                    .on_hover_text(xpeed_i18n::t("Apariencia y ajustes"))
-                    .clicked()
-                {
+                let settings_tip = if self.updates.available() {
+                    xpeed_i18n::t("Update available")
+                } else {
+                    xpeed_i18n::t("Apariencia y ajustes")
+                };
+                if settings_button.on_hover_text(settings_tip).clicked() {
                     action = Some(Action::Settings);
                 }
             });
@@ -2146,6 +2155,19 @@ impl Xpeed {
                                 }
                             });
                             ui.add_space(8.0);
+                            ui.label(xpeed_i18n::t("Interface density"));
+                            ui.horizontal_wrapped(|ui| {
+                                for (density, label) in [
+                                    (Density::Compact, xpeed_i18n::t("Compact")),
+                                    (Density::Comfortable, xpeed_i18n::t("Comfortable")),
+                                    (Density::Spacious, xpeed_i18n::t("Spacious")),
+                                ] {
+                                    changed |= ui
+                                        .selectable_value(&mut self.settings.density, density, label)
+                                        .changed();
+                                }
+                            });
+                            ui.add_space(8.0);
                             for (index, name) in Palette::names(self.settings.mode).iter().enumerate() {
                                 let theme = Palette::new(self.settings.mode, index);
                                 let selected = if self.settings.mode == Mode::Dark { self.settings.dark_theme } else { self.settings.light_theme } == index;
@@ -2448,6 +2470,7 @@ impl Xpeed {
     }
     fn frame(&mut self, ctx: &egui::Context) {
         xpeed_i18n::set_language(self.settings.language);
+        self.updates.poll(ctx);
         self.extensions.language_changed(self.settings.language);
         for session in self.sessions.values_mut() {
             session.poll();

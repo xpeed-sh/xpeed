@@ -13,6 +13,7 @@ pub struct Settings {
     pub mode: crate::palette::Mode,
     pub dark_theme: usize,
     pub light_theme: usize,
+    pub density: crate::palette::Density,
     pub follow_terminal: bool,
     pub record_commands: bool,
     pub attach_terminal_to_ai: bool,
@@ -30,6 +31,7 @@ impl Default for Settings {
             mode: crate::palette::Mode::Dark,
             dark_theme: 0,
             light_theme: 0,
+            density: crate::palette::Density::Comfortable,
             follow_terminal: true,
             record_commands: true,
             attach_terminal_to_ai: false,
@@ -97,6 +99,7 @@ mod tests {
         .unwrap();
         assert_eq!(settings.language, xpeed_i18n::Language::English);
         assert_eq!(settings.font_size, 18.0);
+        assert_eq!(settings.density, crate::palette::Density::Comfortable);
         assert!(!settings.follow_terminal && !settings.record_commands);
     }
     #[test]

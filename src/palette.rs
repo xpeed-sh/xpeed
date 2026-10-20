@@ -9,6 +9,14 @@ pub enum Mode {
     Light,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+    Spacious,
+}
+
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub name: &'static str,
@@ -118,7 +126,7 @@ impl Palette {
             }
         }
     }
-    pub fn apply(&self, ctx: &egui::Context) {
+    pub fn apply(&self, ctx: &egui::Context, density: Density) {
         let mut style = (*ctx.style()).clone();
         style.visuals = if self.mode == Mode::Dark {
             egui::Visuals::dark()
@@ -143,14 +151,19 @@ impl Palette {
         style.visuals.widgets.hovered.weak_bg_fill = style.visuals.widgets.hovered.bg_fill;
         style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, self.accent);
         style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, self.text);
-        style.spacing.item_spacing = Vec2::new(7.0, 7.0);
-        style.spacing.button_padding = Vec2::new(10.0, 6.0);
+        let (spacing, padding, body, button) = match density {
+            Density::Compact => (Vec2::new(5.0, 4.0), Vec2::new(7.0, 4.0), 12.0, 11.0),
+            Density::Comfortable => (Vec2::new(7.0, 7.0), Vec2::new(10.0, 6.0), 13.0, 12.0),
+            Density::Spacious => (Vec2::new(9.0, 9.0), Vec2::new(12.0, 8.0), 14.0, 13.0),
+        };
+        style.spacing.item_spacing = spacing;
+        style.spacing.button_padding = padding;
         style
             .text_styles
-            .insert(egui::TextStyle::Body, FontId::proportional(13.0));
+            .insert(egui::TextStyle::Body, FontId::proportional(body));
         style
             .text_styles
-            .insert(egui::TextStyle::Button, FontId::proportional(12.0));
+            .insert(egui::TextStyle::Button, FontId::proportional(button));
         ctx.set_style(style);
     }
 }

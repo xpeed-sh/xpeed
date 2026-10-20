@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0 - 2026-10-19
+
+- Actualizaciones integradas: Xpeed consulta automáticamente la última Release estable, descarga el instalador oficial con progreso, valida su tamaño y SHA-256 publicado por GitHub y abre el instalador desde Ajustes. Un indicador en Ajustes avisa cuando hay una versión nueva.
+- Publicación reproducible mediante etiquetas `vX.Y.Z`: GitHub Actions valida que la etiqueta coincida con `VERSION`, genera el instalador de Windows, crea `SHA256SUMS.txt` y publica ambos en la Release.
+- Nuevos modos de densidad Compacta, Cómoda y Espaciosa para adaptar controles, separación y tipografía de la interfaz sin modificar el tamaño de la terminal.
+- El ciclo en reposo conserva el refresco reducido y las tareas de red continúan fuera del hilo de interfaz; las descargas de actualización despiertan la vista solo cuando hay progreso.
+
 ## 0.10.9 - 2026-10-15
 
 - Corregida la instalación y actualización desde Git en Windows: el proyecto descargado se conserva hasta confirmar o cancelar el diálogo de permisos.
