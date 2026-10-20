@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 - 2026-10-19
+## 0.11.0 - 2026-10-20
 
 - Actualizaciones integradas: Xpeed consulta automáticamente la última Release estable, descarga el instalador oficial con progreso, valida su tamaño y SHA-256 publicado por GitHub y abre el instalador desde Ajustes. Un indicador en Ajustes avisa cuando hay una versión nueva.
 - Publicación reproducible mediante etiquetas `vX.Y.Z`: GitHub Actions valida que la etiqueta coincida con `VERSION`, genera el instalador de Windows, crea `SHA256SUMS.txt` y publica ambos en la Release.
