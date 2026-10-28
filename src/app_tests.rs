@@ -2,6 +2,13 @@ use super::*;
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect};
 
 #[test]
+fn recent_connections_switch_from_grid_to_list_as_home_panel_narrows() {
+    assert_eq!(recent_connection_columns(900.0), 3);
+    assert_eq!(recent_connection_columns(500.0), 2);
+    assert_eq!(recent_connection_columns(320.0), 1);
+}
+
+#[test]
 fn popup_layer_stays_above_sidebar_divider_even_when_created_first() {
     let ctx = egui::Context::default();
     let mut app = Xpeed::from_context(&ctx, true);

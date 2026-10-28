@@ -32,6 +32,17 @@ pub fn terminal_view(
     if response.clicked() || response.drag_started() {
         response.request_focus();
     }
+    if response.has_focus()
+        && ui.input(|input| {
+            input.pointer.any_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|position| !response.rect.contains(position))
+        })
+    {
+        response.surrender_focus();
+    }
     if focused && keyboard && ui.ctx().memory(|m| m.focused().is_none()) {
         response.request_focus();
     }
@@ -109,6 +120,11 @@ pub fn terminal_view(
             && let Some(selection) = &mut term.selection
         {
             selection.update(point_at(pos), Side::Right);
+            let edge_scroll = selection_drag_scroll(pos.y, rect, cell_height);
+            if edge_scroll != 0 {
+                scroll += edge_scroll;
+                ui.ctx().request_repaint();
+            }
         }
         if response.clicked() && !response.double_clicked() {
             term.selection = None;
@@ -119,10 +135,11 @@ pub fn terminal_view(
             session.scroll_remainder -= scroll as f32 * cell_height;
         }
         let mode = *term.mode();
-        if focused && keyboard && session.record_commands && !mode.contains(TermMode::ALT_SCREEN) {
+        let accepts_keyboard = focused && keyboard && response.has_focus();
+        if accepts_keyboard && session.record_commands && !mode.contains(TermMode::ALT_SCREEN) {
             editor = command_editor(&term, cols);
         }
-        if focused && keyboard {
+        if accepts_keyboard {
             let events = ui.input(|i| i.events.clone());
             let modifiers = ui.input(|i| i.modifiers);
             for event in events {
@@ -332,6 +349,17 @@ pub fn terminal_view(
     response.clicked() || response.drag_started()
 }
 
+fn selection_drag_scroll(pointer_y: f32, rect: Rect, cell_height: f32) -> i32 {
+    let edge = (cell_height * 1.5).max(18.0);
+    if pointer_y < rect.top() + edge {
+        (((rect.top() + edge - pointer_y) / cell_height).ceil() as i32).clamp(1, 6)
+    } else if pointer_y > rect.bottom() - edge {
+        -(((pointer_y - (rect.bottom() - edge)) / cell_height).ceil() as i32).clamp(1, 6)
+    } else {
+        0
+    }
+}
+
 pub(crate) fn command_editor<T: alacritty_terminal::event::EventListener>(
     term: &alacritty_terminal::term::Term<T>,
     cols: usize,
@@ -435,5 +463,14 @@ mod tests {
         assert_eq!(search_columns("áé Xpeed ñ", "XPEED"), vec![(3, 8)]);
         assert_eq!(search_columns("İ ABC", "abc"), vec![(2, 5)]);
         assert_eq!(search_columns("aa aa", "aa"), vec![(0, 2), (3, 5)]);
+    }
+    #[test]
+    fn dragging_selection_near_terminal_edges_scrolls_in_both_directions() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 10.0), Pos2::new(200.0, 210.0));
+        assert!(selection_drag_scroll(10.0, rect, 20.0) > 0);
+        assert_eq!(selection_drag_scroll(100.0, rect, 20.0), 0);
+        assert!(selection_drag_scroll(210.0, rect, 20.0) < 0);
+        assert_eq!(selection_drag_scroll(-500.0, rect, 20.0), 6);
+        assert_eq!(selection_drag_scroll(500.0, rect, 20.0), -6);
     }
 }

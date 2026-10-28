@@ -22,6 +22,16 @@ use std::{
 
 const PANEL_GAP: i8 = 5;
 
+fn recent_connection_columns(available_width: f32) -> usize {
+    if available_width >= 620.0 {
+        3
+    } else if available_width >= 420.0 {
+        2
+    } else {
+        1
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SidebarView {
     Sessions,
@@ -1897,9 +1907,14 @@ impl Xpeed {
                             });
                         });
                 }
-                let terminal_focus = ctx.memory(|memory| memory.focused()).is_none_or(|focus| {
-                    self.focused.and_then(|id| self.sessions.get(&id)).is_some_and(|session| session.input_id == Some(focus))
-                });
+                let focused_widget = ctx.memory(|memory| memory.focused());
+                let terminal_focus = self
+                    .focused
+                    .and_then(|id| self.sessions.get(&id))
+                    .is_some_and(|session| match focused_widget {
+                        Some(widget) => session.input_id == Some(widget),
+                        None => session.input_id.is_none(),
+                    });
                 let keyboard = terminal_focus
                     && !self.show_palette
                     && self.editor.is_none()
@@ -3115,14 +3130,39 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
                                 .color(p.muted),
                         );
                     }
-                    for connection in self.connections.recent.iter().take(6) {
-                        if ui
-                            .button(&connection.name)
-                            .on_hover_text(connection.description())
-                            .clicked()
-                        {
-                            self.actions.push(Action::Open(connection.clone()));
-                        }
+                    let recent: Vec<_> = self.connections.recent.iter().take(6).cloned().collect();
+                    let columns = recent_connection_columns(ui.available_width());
+                    let card_width = match columns {
+                        3 => 190.0,
+                        2 => 210.0,
+                        _ => ui.available_width().min(300.0),
+                    };
+                    for row in recent.chunks(columns) {
+                        let row_width = card_width * row.len() as f32
+                            + ui.spacing().item_spacing.x * row.len().saturating_sub(1) as f32;
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(row_width, 54.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                for connection in row {
+                                    let label = format!(
+                                        "{}\n{}",
+                                        connection.name,
+                                        connection.description()
+                                    );
+                                    if ui
+                                        .add_sized(
+                                            [card_width, 50.0],
+                                            egui::Button::new(RichText::new(label).size(12.0)),
+                                        )
+                                        .on_hover_text(connection.description())
+                                        .clicked()
+                                    {
+                                        self.actions.push(Action::Open(connection.clone()));
+                                    }
+                                }
+                            },
+                        );
                     }
                     ui.add_space(20.0);
                     ui.label(

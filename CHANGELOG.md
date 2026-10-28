@@ -1,9 +1,12 @@
 # Changelog
 
-## Sin publicar
+## 0.11.1 - 2026-10-28
 
 - El catálogo de Codex deja de fijar una versión antigua del ejecutable y muestra un requisito de compatibilidad que puede avanzar con cada versión de la extensión.
 - Los empaquetadores de extensiones limpian avisos de dependencias obsoletos y evitan duplicar la sección `workspace` al regenerar repositorios independientes.
+- La terminal desplaza el historial automáticamente mientras una selección de texto se arrastra hacia sus bordes, permitiendo seleccionar contenido que ocupa más de una pantalla.
+- El foco de teclado queda aislado por panel: copiar texto desde Codex u otra vista ya no envía accidentalmente `Ctrl+C` a la terminal.
+- Las conexiones recientes del inicio se presentan como tarjetas en una cuadrícula centrada y adaptable de tres, dos o una columna.
 
 ## 0.11.0 - 2026-10-20
 
