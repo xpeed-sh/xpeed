@@ -65,7 +65,10 @@ foreach ($entry in $entries) {
         Copy-Item -LiteralPath (Join-Path $projectRoot "crates/xpeed-i18n/$name") -Destination $vendorDirectory -Recurse -Force
     }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $vendorDirectory -Force
-    $cargoManifest = (Get-Content -LiteralPath (Join-Path $source 'Cargo.toml') -Raw).Replace('../../crates/xpeed-i18n','vendor/xpeed-i18n') + "`n[workspace]`n"
+    $cargoManifest = (Get-Content -LiteralPath (Join-Path $source 'Cargo.toml') -Raw).Replace('../../crates/xpeed-i18n','vendor/xpeed-i18n')
+    if ($cargoManifest -notmatch '(?m)^\[workspace\]\s*$') {
+        $cargoManifest += "`n[workspace]`n"
+    }
     [IO.File]::WriteAllText((Join-Path $destination 'Cargo.toml'), $cargoManifest, [Text.UTF8Encoding]::new($false))
     cargo generate-lockfile --offline --manifest-path (Join-Path $destination 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo preparar el Cargo.lock del proyecto' }

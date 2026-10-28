@@ -35,6 +35,12 @@ while ($pending.Count -gt 0) {
 }
 foreach ($base in @('extensions\packages')) {
     $package = Join-Path $projectRoot "$base\xpeed.codex"
+    foreach ($generated in @('licenses', 'THIRD_PARTY.txt')) {
+        $generatedPath = Join-Path $package $generated
+        if (Test-Path -LiteralPath $generatedPath) {
+            Remove-Item -LiteralPath $generatedPath -Recurse -Force
+        }
+    }
     New-Item -ItemType Directory -Force "$package\bin" | Out-Null
     Copy-Item -LiteralPath "$projectRoot\target\release\xpeed-codex-extension.exe" -Destination "$package\bin\xpeed-codex-extension.exe" -Force
     Copy-Item -LiteralPath "$projectRoot\extensions\codex\extension.json" -Destination $package -Force

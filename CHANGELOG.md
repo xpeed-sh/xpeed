@@ -1,5 +1,10 @@
 # Changelog
 
+## Sin publicar
+
+- El catálogo de Codex deja de fijar una versión antigua del ejecutable y muestra un requisito de compatibilidad que puede avanzar con cada versión de la extensión.
+- Los empaquetadores de extensiones limpian avisos de dependencias obsoletos y evitan duplicar la sección `workspace` al regenerar repositorios independientes.
+
 ## 0.11.0 - 2026-10-20
 
 - Actualizaciones integradas: Xpeed consulta automáticamente la última Release estable, descarga el instalador oficial con progreso, valida su tamaño y SHA-256 publicado por GitHub y abre el instalador desde Ajustes. Un indicador en Ajustes avisa cuando hay una versión nueva.

@@ -6,7 +6,7 @@
   "sessions.tools": "Ejecutar comandos y acceder a archivos de sesiones autorizadas explícitamente",
   "Codex with ChatGPT sign-in and tools for explicitly selected local and SSH sessions.": "Codex con acceso de ChatGPT y herramientas para sesiones locales y SSH seleccionadas explícitamente.",
   "ChatGPT sign-in and tools for explicitly selected local and SSH sessions.": "Acceso con ChatGPT y herramientas para sesiones locales y SSH seleccionadas explícitamente.",
-  "XPEED 0.8.0+ and local Codex CLI 0.162.0-alpha.2. SSH tools require sh, timeout and OpenSSH SFTP.": "XPEED 0.8.0+ y Codex CLI local 0.162.0-alpha.2. Las herramientas SSH requieren sh, timeout y SFTP de OpenSSH.",
+  "XPEED 0.8.0+ and a compatible local Codex CLI. SSH tools require sh, timeout and OpenSSH SFTP.": "XPEED 0.8.0+ y un Codex CLI local compatible. Las herramientas SSH requieren sh, timeout y SFTP de OpenSSH.",
   "Tu espacio de trabajo para terminales y servidores.": "Tu espacio de trabajo para terminales y servidores.",
   "Terminal local, conexiones SSH, archivos remotos y extensiones.": "Terminal local, conexiones SSH, archivos remotos y extensiones.",
   "Conexiones activas en esta sesión.": "Conexiones activas en esta sesión.",
