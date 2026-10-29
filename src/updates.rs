@@ -1,5 +1,4 @@
 use eframe::egui;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
@@ -10,7 +9,7 @@ use std::{
 };
 
 const RELEASES: &str = "https://github.com/xpeed-sh/xpeed/releases";
-const API: &str = "https://api.github.com/repos/xpeed-sh/xpeed/releases/latest";
+const LATEST: &str = "https://github.com/xpeed-sh/xpeed/releases/latest";
 const MAX_INSTALLER_SIZE: u64 = 512 * 1024 * 1024;
 
 #[derive(Default)]
@@ -76,50 +75,22 @@ fn parse_digest(value: &str) -> Option<String> {
         .then(|| digest.to_ascii_lowercase())
 }
 
-fn parse_release(data: &Value, installed: &str) -> Result<Option<Release>, String> {
-    if data["draft"].as_bool() != Some(false) || data["prerelease"].as_bool() != Some(false) {
-        return Err("No stable release is available.".into());
-    }
-    let tag = data["tag_name"]
-        .as_str()
-        .ok_or("Invalid release metadata.")?;
-    let candidate = version(tag).ok_or("Invalid release version.")?;
-    if candidate <= version(installed).ok_or("Invalid installed version.")? {
-        return Ok(None);
-    }
-    let number = tag.strip_prefix('v').unwrap_or(tag);
-    let expected = format!("Xpeed-Setup-{number}-x64.exe");
-    let prefix = format!("{RELEASES}/download/{tag}/");
-    let installer = data["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find_map(|asset| {
-            if asset["name"].as_str()? != expected || asset["state"].as_str()? != "uploaded" {
-                return None;
-            }
-            let url = asset["browser_download_url"].as_str()?;
-            let size = asset["size"].as_u64()?;
-            let sha256 = parse_digest(asset["digest"].as_str()?)?;
-            (url == format!("{prefix}{expected}") && size > 0 && size <= MAX_INSTALLER_SIZE).then(
-                || Installer {
-                    name: expected.clone(),
-                    url: url.to_owned(),
-                    size,
-                    sha256,
-                },
-            )
-        });
-    Ok(Some(Release {
-        version: number.into(),
-        notes: data["body"]
-            .as_str()
-            .unwrap_or("")
-            .chars()
-            .take(16000)
-            .collect(),
-        installer,
-    }))
+fn tag_from_latest_url(value: &str) -> Option<&str> {
+    let tag = value.strip_prefix(&format!("{RELEASES}/tag/"))?;
+    (!tag.is_empty() && !tag.contains(['/', '?', '#']) && version(tag).is_some()).then_some(tag)
+}
+
+fn checksum_for(value: &str, expected_name: &str) -> Option<String> {
+    value.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let digest = fields.next()?;
+        let raw_name = fields.next()?;
+        let name = raw_name.strip_prefix('*').unwrap_or(raw_name);
+        if fields.next().is_some() || name != expected_name {
+            return None;
+        }
+        parse_digest(&format!("sha256:{digest}"))
+    })
 }
 
 fn client() -> Result<reqwest::blocking::Client, String> {
@@ -131,9 +102,12 @@ fn client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn check() -> Result<Option<Release>, String> {
+    check_for(env!("CARGO_PKG_VERSION"))
+}
+
+fn check_for(installed: &str) -> Result<Option<Release>, String> {
     let response = client()?
-        .get(API)
-        .header("Accept", "application/vnd.github+json")
+        .get(LATEST)
         .timeout(Duration::from_secs(20))
         .send()
         .map_err(|_| "Unable to check updates. Check your connection and retry.".to_string())?;
@@ -143,17 +117,52 @@ fn check() -> Result<Option<Release>, String> {
     let response = response
         .error_for_status()
         .map_err(|_| "GitHub could not complete the update check. Retry later.".to_string())?;
-    let mut bytes = Vec::new();
-    response
-        .take(1_048_577)
-        .read_to_end(&mut bytes)
+    let tag = tag_from_latest_url(response.url().as_str()).ok_or("Invalid release metadata.")?;
+    let candidate = version(tag).ok_or("Invalid release version.")?;
+    if candidate <= version(installed).ok_or("Invalid installed version.")? {
+        return Ok(None);
+    }
+    let number = tag.strip_prefix('v').unwrap_or(tag);
+    let name = format!("Xpeed-Setup-{number}-x64.exe");
+    let url = format!("{RELEASES}/download/{tag}/{name}");
+    let sums_url = format!("{RELEASES}/download/{tag}/SHA256SUMS.txt");
+    let mut sums_response = client()?
+        .get(sums_url)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|_| "The release checksum is not available yet. Retry later.".to_string())?;
+    let mut sums = Vec::new();
+    sums_response
+        .by_ref()
+        .take(4097)
+        .read_to_end(&mut sums)
         .map_err(|_| "Unable to read release metadata.".to_string())?;
-    if bytes.len() > 1_048_576 {
+    if sums.len() > 4096 {
         return Err("Release metadata is too large.".into());
     }
-    let data =
-        serde_json::from_slice(&bytes).map_err(|_| "Invalid release metadata.".to_string())?;
-    parse_release(&data, env!("CARGO_PKG_VERSION"))
+    let sums = std::str::from_utf8(&sums).map_err(|_| "Invalid release metadata.")?;
+    let sha256 = checksum_for(sums, &name).ok_or("Invalid release checksum metadata.")?;
+    let asset = client()?
+        .get(&url)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|_| "The Windows installer is not available yet. Retry later.".to_string())?;
+    let size = asset
+        .content_length()
+        .filter(|size| *size > 0 && *size <= MAX_INSTALLER_SIZE)
+        .ok_or("The published installer size is invalid.")?;
+    Ok(Some(Release {
+        version: number.into(),
+        notes: String::new(),
+        installer: Some(Installer {
+            name,
+            url,
+            size,
+            sha256,
+        }),
+    }))
 }
 
 fn download(installer: Installer, sender: mpsc::Sender<DownloadEvent>) -> Result<(), String> {
@@ -374,48 +383,55 @@ impl Updates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn release() -> Value {
-        json!({"draft":false,"prerelease":false,"tag_name":"v0.10.8","assets":[{"state":"uploaded","name":"Xpeed-Setup-0.10.8-x64.exe","size":9482532,"digest":"sha256:fdd1e175a3f51cc1a62af2d8c415862575080f90f47a1b249b38973015c0a2d8","browser_download_url":"https://github.com/xpeed-sh/xpeed/releases/download/v0.10.8/Xpeed-Setup-0.10.8-x64.exe"}]})
-    }
 
     #[test]
     fn compares_numbers_and_never_offers_a_downgrade() {
         assert!(version("0.10.10") > version("0.10.9"));
-        assert!(parse_release(&release(), "0.10.8").unwrap().is_none());
-        assert!(parse_release(&release(), "0.11.0").unwrap().is_none());
         assert!(version("v0.10.9-preview").is_none());
     }
 
     #[test]
-    fn offers_only_exact_official_verified_installer() {
-        let mut data = release();
-        assert!(
-            parse_release(&data, "0.10.7")
-                .unwrap()
-                .unwrap()
-                .installer
-                .is_some()
+    fn release_metadata_accepts_only_exact_official_tags_and_checksums() {
+        assert_eq!(
+            tag_from_latest_url("https://github.com/xpeed-sh/xpeed/releases/tag/v0.11.2"),
+            Some("v0.11.2")
         );
-        data["assets"][0]["browser_download_url"] = json!("https://example.com/installer.exe");
-        assert!(
-            parse_release(&data, "0.10.7")
-                .unwrap()
-                .unwrap()
-                .installer
-                .is_none()
+        for invalid in [
+            "https://example.com/xpeed/releases/tag/v0.11.2",
+            "https://github.com/xpeed-sh/xpeed/releases/tag/v0.11.2/asset",
+            "https://github.com/xpeed-sh/xpeed/releases/tag/latest",
+        ] {
+            assert!(tag_from_latest_url(invalid).is_none());
+        }
+        let digest = "fdd1e175a3f51cc1a62af2d8c415862575080f90f47a1b249b38973015c0a2d8";
+        assert_eq!(
+            checksum_for(
+                &format!("{digest} *Xpeed-Setup-0.11.2-x64.exe\n"),
+                "Xpeed-Setup-0.11.2-x64.exe"
+            ),
+            Some(digest.into())
         );
-        data = release();
-        data["assets"][0]["digest"] = json!("sha256:bad");
         assert!(
-            parse_release(&data, "0.10.7")
-                .unwrap()
-                .unwrap()
-                .installer
-                .is_none()
+            checksum_for(
+                &format!("{digest} *other.exe"),
+                "Xpeed-Setup-0.11.2-x64.exe"
+            )
+            .is_none()
         );
-        data["prerelease"] = json!(true);
-        assert!(parse_release(&data, "0.10.7").is_err());
+        assert!(
+            checksum_for(
+                "bad *Xpeed-Setup-0.11.2-x64.exe",
+                "Xpeed-Setup-0.11.2-x64.exe"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the public GitHub release endpoints"]
+    fn public_release_check_does_not_require_the_github_api() {
+        let release = check_for("0.11.0").unwrap().unwrap();
+        assert!(version(&release.version) > version("0.11.0"));
+        assert!(release.installer.is_some());
     }
 }

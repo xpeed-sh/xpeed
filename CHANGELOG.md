@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2 - 2026-10-29
+
+- El actualizador consulta la Release pública y su archivo `SHA256SUMS.txt` sin depender del límite compartido de la API de GitHub. Conserva la validación del origen, nombre, tamaño y SHA-256 del instalador.
+
 ## 0.11.1 - 2026-10-28
 
 - El catálogo de Codex deja de fijar una versión antigua del ejecutable y muestra un requisito de compatibilidad que puede avanzar con cada versión de la extensión.

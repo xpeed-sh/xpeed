@@ -2,7 +2,7 @@
 
 ## Instalador: compartir un solo .exe
 
-Comparte `dist/installer/Xpeed-Setup-0.11.1-x64.exe`. Instala Xpeed en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye el catálogo de extensiones, desinstalador, interfaz en inglés y español, documentación y licencias. Las extensiones se instalan después desde sus repositorios Git públicos. No solicita permisos de administrador.
+Comparte `dist/installer/Xpeed-Setup-0.11.2-x64.exe`. Instala Xpeed en `%LOCALAPPDATA%\Programs\Xpeed`, crea un acceso en Inicio y permite añadir otro al escritorio. Incluye el catálogo de extensiones, desinstalador, interfaz en inglés y español, documentación y licencias. Las extensiones se instalan después desde sus repositorios Git públicos. No solicita permisos de administrador.
 
 Para generar el instalador instala [Inno Setup 6](https://jrsoftware.org/isdl.php) en el equipo de desarrollo y ejecuta:
 
@@ -14,7 +14,7 @@ Si ya preparaste la carpeta portátil, usa `.\scripts\package-installer.ps1 -Ski
 
 Las actualizaciones usan la misma identidad de instalación. El desinstalador conserva las cuentas, conexiones y chats en `%APPDATA%\xpeed`. Los runtimes de proveedores, como Codex, siguen siendo requisitos opcionales independientes.
 
-La entrega actual está en `dist/Xpeed-0.11.1.exe`. La carpeta `dist/portable/Xpeed-0.11.1` reúne `Xpeed.exe`, documentación, licencias y el catálogo Git: puedes compartirla directamente. Es una aplicación portátil para Windows x64; no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
+La entrega actual está en `dist/Xpeed-0.11.2.exe`. La carpeta `dist/portable/Xpeed-0.11.2` reúne `Xpeed.exe`, documentación, licencias y el catálogo Git: puedes compartirla directamente. Es una aplicación portátil para Windows x64; no necesitas instalar Rust en los equipos que la usarán. El icono y los recursos de interfaz van dentro del ejecutable.
 
 ## Generar otra entrega
 
@@ -39,7 +39,7 @@ En este equipo, los scripts detectan Rust en `.tools` y MinGW en `C:\msys64\ming
 
 ## Qué compartir
 
-- `Xpeed-0.11.1.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
+- `Xpeed-0.11.2.exe`, junto con `LICENSE`, `THIRD_PARTY.md`, `DEPENDENCIES.txt` y la carpeta `licenses` de `dist`, para conservar los avisos de dependencias.
 - `extensions.json` contiene las extensiones disponibles y sus repositorios. La entrega no incluye una carpeta `extensions`: Xpeed la crea en los datos del usuario cuando instala la primera extensión.
 - Codex y Monitor se instalan desde sus repositorios públicos mediante el catálogo incluido. La aplicación principal funciona sin extensiones instaladas.
 
