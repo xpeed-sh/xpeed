@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3 - 2026-10-29
+
+- Las reconexiones reutilizan el mismo búfer de terminal: conservan toda la salida anterior, el historial desplazable, la selección y la posición de lectura en lugar de reemplazar la consola.
+- La terminal marca visualmente la pérdida de conexión, cada intento y la reconexión con su hora. Al revisar salida anterior aparece un acceso directo para volver al final.
+- El texto escrito que no llegó a enviarse se guarda como borrador recuperado. Tras reconectar puede insertarse de nuevo o descartarse; nunca se ejecuta automáticamente.
+
 ## 0.11.2 - 2026-10-29
 
 - El actualizador consulta la Release pública y su archivo `SHA256SUMS.txt` sin depender del límite compartido de la API de GitHub. Conserva la validación del origen, nombre, tamaño y SHA-256 del instalador.

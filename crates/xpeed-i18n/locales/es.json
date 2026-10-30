@@ -702,5 +702,13 @@
   "Interface density": "Densidad de la interfaz",
   "Compact": "Compacta",
   "Comfortable": "Cómoda",
-  "Spacious": "Espaciosa"
+  "Spacious": "Espaciosa",
+  "Connection lost · {time}": "Conexión perdida · {time}",
+  "Reconnection attempt {attempt} · {time}": "Intento de reconexión {attempt} · {time}",
+  "Reconnected · {time}": "Conexión restablecida · {time}",
+  "Recovered draft": "Borrador recuperado",
+  "This text was not sent before the connection ended.": "Este texto no se envió antes de terminar la conexión.",
+  "Insert again": "Insertar de nuevo",
+  "Dismiss": "Descartar",
+  "New output ↓": "Nueva salida ↓"
 }

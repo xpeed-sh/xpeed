@@ -750,19 +750,32 @@ impl Xpeed {
         ctx: &egui::Context,
     ) -> Result<(), String> {
         connection.validate()?;
+        let previous = self.sessions.get(&id).filter(|session| session.exited);
         let mut session = match &connection.target {
-            Target::Local { shell, directory } => Session::spawn(
-                id,
-                *shell,
-                if directory.is_empty() {
+            Target::Local { shell, directory } => {
+                let cwd = if directory.is_empty() {
                     self.cwd.clone()
                 } else {
                     PathBuf::from(directory)
-                },
-                ctx.clone(),
-            )?,
+                };
+                if let Some(previous) = previous {
+                    Session::reconnect_local(id, *shell, cwd, ctx.clone(), previous)?
+                } else {
+                    Session::spawn(id, *shell, cwd, ctx.clone())?
+                }
+            }
             Target::Ssh(config) => {
-                Session::spawn_ssh(id, config.clone(), self.cwd.clone(), ctx.clone())?
+                if let Some(previous) = previous {
+                    Session::reconnect_ssh(
+                        id,
+                        config.clone(),
+                        self.cwd.clone(),
+                        ctx.clone(),
+                        previous,
+                    )?
+                } else {
+                    Session::spawn_ssh(id, config.clone(), self.cwd.clone(), ctx.clone())?
+                }
             }
         };
         session.palette = self.palette();
@@ -1086,6 +1099,18 @@ impl Xpeed {
         self.layout_dirty = false;
     }
     fn reconnect_sessions(&mut self, ctx: &egui::Context) {
+        let newly_disconnected: Vec<_> = self
+            .sessions
+            .iter()
+            .filter_map(|(&id, session)| {
+                (session.unexpected_disconnect && !session.disconnect_marked).then_some(id)
+            })
+            .collect();
+        for id in newly_disconnected {
+            if let Some(session) = self.sessions.get_mut(&id) {
+                preserve_disconnected_session(session);
+            }
+        }
         if !self.settings.auto_reconnect || self.ephemeral {
             for session in self.sessions.values_mut() {
                 if session.reconnecting {
@@ -1119,6 +1144,15 @@ impl Xpeed {
         for (id, attempt) in ready {
             let previous_focus = self.focused;
             let previous_widget = ctx.memory(|m| m.focused());
+            if let Some(session) = self.sessions.get(&id) {
+                session.append_notice(&xpeed_i18n::format(
+                    "Reconnection attempt {attempt} · {time}",
+                    &[
+                        ("attempt", (attempt + 1).to_string()),
+                        ("time", local_clock()),
+                    ],
+                ));
+            }
             if let Some(source) = self.sources.get(&id).cloned() {
                 if let Err(error) = self.start_existing(id, &source, ctx) {
                     self.notice = Some(error);
@@ -1141,6 +1175,24 @@ impl Xpeed {
                 && ((session.auth_complete && !session.exited) || session.at_password_prompt())
             {
                 session.error = None;
+            }
+        }
+        let restored: Vec<_> = self
+            .reconnects
+            .keys()
+            .copied()
+            .filter(|id| {
+                self.sessions.get(id).is_some_and(|session| {
+                    (session.auth_complete && !session.exited) || session.at_password_prompt()
+                })
+            })
+            .collect();
+        for id in restored {
+            if let Some(session) = self.sessions.get(&id) {
+                session.append_notice(&xpeed_i18n::format(
+                    "Reconnected · {time}",
+                    &[("time", local_clock())],
+                ));
             }
         }
         self.reconnects.retain(|id, _| {
@@ -1231,6 +1283,13 @@ impl Xpeed {
             }
             Action::Reconnect(id) => {
                 self.reconnects.remove(&id);
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    preserve_disconnected_session(session);
+                    session.append_notice(&xpeed_i18n::format(
+                        "Reconnection attempt {attempt} · {time}",
+                        &[("attempt", "1".into()), ("time", local_clock())],
+                    ));
+                }
                 if let Some(connection) = self.sources.get(&id).cloned()
                     && let Err(error) = self.start_existing(id, &connection, ctx)
                 {
@@ -3176,7 +3235,9 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
             }
             Pane::Terminal(id) => {
                 if let Some(session) = self.sessions.get_mut(&id) {
-                    let has_status = session.exited || session.error.is_some();
+                    let has_status = session.exited
+                        || session.error.is_some()
+                        || session.recovered_draft.is_some();
                     let area = ui.available_rect_before_wrap();
                     let height_id = ui.id().with(("terminal_status_height", id));
                     let status_height = if has_status {
@@ -3805,11 +3866,36 @@ fn save_capture(
 #[path = "app_tests.rs"]
 mod tests;
 
-fn terminal_status(ui: &mut egui::Ui, session: &Session, p: Palette) -> bool {
-    if !session.exited && session.error.is_none() {
+fn local_clock() -> String {
+    chrono::Local::now().format("%H:%M:%S").to_string()
+}
+
+fn preserve_disconnected_session(session: &mut Session) {
+    if session.disconnect_marked {
+        return;
+    }
+    if session.recovered_draft.is_none() {
+        let draft = session.term.lock().ok().and_then(|term| {
+            crate::terminal_view::command_editor(&term, session.size.cols)
+                .map(|editor| editor.text.iter().collect::<String>())
+        });
+        session.recovered_draft = draft.filter(|text| !text.trim().is_empty());
+    }
+    session.disconnect_marked = true;
+    session.append_notice(&xpeed_i18n::format(
+        "Connection lost · {time}",
+        &[("time", local_clock())],
+    ));
+}
+
+fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool {
+    if !session.exited && session.error.is_none() && session.recovered_draft.is_none() {
         return false;
     }
     let mut reconnect = false;
+    let mut insert_draft = false;
+    let mut dismiss_draft = false;
+    let recovered_draft = session.recovered_draft.clone();
     egui::Frame::new()
         .fill(p.raised)
         .corner_radius(8.0)
@@ -3822,6 +3908,8 @@ fn terminal_status(ui: &mut egui::Ui, session: &Session, p: Palette) -> bool {
                     "Reconnecting"
                 } else if session.exited {
                     "Session disconnected"
+                } else if recovered_draft.is_some() {
+                    "Recovered draft"
                 } else {
                     "Session notice"
                 };
@@ -3856,7 +3944,52 @@ fn terminal_status(ui: &mut egui::Ui, session: &Session, p: Palette) -> bool {
                         }
                     });
             }
+            if let Some(draft) = &recovered_draft {
+                ui.add_space(5.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(xpeed_i18n::t(
+                            "This text was not sent before the connection ended.",
+                        ))
+                        .small()
+                        .color(p.muted),
+                    )
+                    .wrap(),
+                );
+                egui::Frame::new()
+                    .fill(p.bg)
+                    .corner_radius(5.0)
+                    .inner_margin(7.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(draft).monospace().size(12.0).color(p.text),
+                            )
+                            .wrap(),
+                        );
+                    });
+                ui.horizontal(|ui| {
+                    insert_draft = ui
+                        .add_enabled(
+                            !session.exited && session.auth_complete,
+                            egui::Button::new(xpeed_i18n::t("Insert again")),
+                        )
+                        .clicked();
+                    dismiss_draft = ui.small_button(xpeed_i18n::t("Dismiss")).clicked();
+                });
+            }
         });
+    if insert_draft {
+        if let Some(draft) = session.recovered_draft.take() {
+            session.bottom();
+            session.send_user(draft.into_bytes());
+            if let Some(input_id) = session.input_id {
+                ui.ctx().memory_mut(|memory| memory.request_focus(input_id));
+            }
+        }
+    } else if dismiss_draft {
+        session.recovered_draft = None;
+    }
     ui.add_space(6.0);
     reconnect
 }

@@ -585,6 +585,35 @@ fn transient_tiny_terminal_layout_does_not_resize_shell_and_disconnect_card_stay
 }
 
 #[test]
+fn reconnect_reuses_terminal_scrollback_and_keeps_recovered_draft() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    app.action(Action::Local(Profile::default_shell()), &ctx);
+    isolate_test_shells(&mut app, &ctx);
+    let id = app.focused.unwrap();
+    wait_for_empty_prompt(&mut app, &ctx, id);
+    let old_term = app.sessions[&id].term.clone();
+    {
+        let session = app.sessions.get_mut(&id).unwrap();
+        session.append_notice("PRESERVED_SCROLLBACK_MARKER");
+        session.recovered_draft = Some("echo recovered-draft".into());
+        session.exited = true;
+        session.unexpected_disconnect = true;
+    }
+
+    app.action(Action::Reconnect(id), &ctx);
+
+    let session = &app.sessions[&id];
+    assert!(std::sync::Arc::ptr_eq(&old_term, &session.term));
+    assert_eq!(
+        session.recovered_draft.as_deref(),
+        Some("echo recovered-draft")
+    );
+    assert!(output(session).contains("PRESERVED_SCROLLBACK_MARKER"));
+    app.close(id);
+}
+
+#[test]
 fn terminal_keeps_focus_during_repeated_history_navigation_and_history_click_inserts_only() {
     let ctx = egui::Context::default();
     let mut app = Xpeed::from_context(&ctx, true);

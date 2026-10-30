@@ -82,11 +82,13 @@ pub fn terminal_view(
     let mut outgoing = Vec::new();
     let mut scroll = 0;
     let mut editor = None;
+    let display_offset;
     {
         let Ok(mut term) = session.term.lock() else {
             return false;
         };
         let offset = term.grid().display_offset();
+        display_offset = offset;
         let point_at = |pos: Pos2| {
             Point::new(
                 Line(
@@ -298,6 +300,23 @@ pub fn terminal_view(
     for bytes in outgoing {
         crate::history::record_input(&mut editor, &bytes, &mut session.commands);
         session.send_user(bytes);
+    }
+    if display_offset > 0 {
+        let size = Vec2::new(128.0, 28.0);
+        let button_rect = Rect::from_min_size(
+            Pos2::new(rect.right() - size.x - 6.0, rect.bottom() - size.y - 6.0),
+            size,
+        );
+        if ui
+            .put(
+                button_rect,
+                egui::Button::new(xpeed_i18n::t("New output ↓")),
+            )
+            .clicked()
+        {
+            session.bottom();
+            ui.ctx().request_repaint();
+        }
     }
     response.context_menu(|ui| {
         let selection = session

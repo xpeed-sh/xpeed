@@ -86,14 +86,16 @@ impl Dimensions for Size {
 
 #[derive(Clone)]
 pub struct Proxy {
-    tx: Sender<Event>,
+    tx: Arc<Mutex<Sender<Event>>>,
 }
 impl EventListener for Proxy {
     fn send_event(&self, event: Event) {
         if matches!(&event, Event::Title(title) if title.starts_with("XPEED;")) {
             return;
         }
-        let _ = self.tx.send(event);
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(event);
+        }
     }
 }
 
@@ -108,6 +110,7 @@ pub struct Session {
     child: Option<Box<dyn Child + Send + Sync>>,
     input: Option<SyncSender<Vec<u8>>>,
     events: Receiver<Event>,
+    event_tx: Arc<Mutex<Sender<Event>>>,
     failures: Receiver<String>,
     pub error: Option<String>,
     pub exited: bool,
@@ -121,6 +124,8 @@ pub struct Session {
     pub input_id: Option<egui::Id>,
     pub commands: Vec<String>,
     pub chat_selection: Option<String>,
+    pub recovered_draft: Option<String>,
+    pub disconnect_marked: bool,
     search_position: Option<(String, i32)>,
     pub record_commands: bool,
     pub history_key: String,
@@ -147,10 +152,13 @@ impl Session {
             })
             .map_err(|e| e.to_string())?;
         let (tx, events) = mpsc::channel();
+        let event_tx = Arc::new(Mutex::new(tx));
         let term = Arc::new(Mutex::new(Term::new(
             Config::default(),
             &size,
-            Proxy { tx },
+            Proxy {
+                tx: event_tx.clone(),
+            },
         )));
         let (input, _receiver) = mpsc::sync_channel(1);
         let console = crate::terminal_agent::Console::new(input, term.clone(), Profile::System);
@@ -168,6 +176,7 @@ impl Session {
             child: None,
             input: None,
             events,
+            event_tx,
             failures,
             error: None,
             exited: false,
@@ -181,6 +190,8 @@ impl Session {
             input_id: None,
             commands: Vec::new(),
             chat_selection: None,
+            recovered_draft: None,
+            disconnect_marked: false,
             search_position: None,
             record_commands: false,
             history_key: "preview".into(),
@@ -219,6 +230,24 @@ impl Session {
         Self::spawn_command(id, shell, cwd, ctx, shell.command(), None)
     }
 
+    pub fn reconnect_local(
+        id: u64,
+        shell: Profile,
+        cwd: PathBuf,
+        ctx: egui::Context,
+        previous: &Self,
+    ) -> Result<Self, String> {
+        Self::spawn_command_with_previous(
+            id,
+            shell,
+            cwd,
+            ctx,
+            shell.command(),
+            None,
+            Some(previous),
+        )
+    }
+
     pub fn spawn_ssh(
         id: u64,
         config: crate::connections::SshConfig,
@@ -227,6 +256,25 @@ impl Session {
     ) -> Result<Self, String> {
         let command = config.command()?;
         Self::spawn_command(id, Profile::System, cwd, ctx, command, Some(config))
+    }
+
+    pub fn reconnect_ssh(
+        id: u64,
+        config: crate::connections::SshConfig,
+        cwd: PathBuf,
+        ctx: egui::Context,
+        previous: &Self,
+    ) -> Result<Self, String> {
+        let command = config.command()?;
+        Self::spawn_command_with_previous(
+            id,
+            Profile::System,
+            cwd,
+            ctx,
+            command,
+            Some(config),
+            Some(previous),
+        )
     }
     #[cfg(test)]
     pub fn spawn_ssh_fixture(
@@ -249,13 +297,25 @@ impl Session {
         shell: Profile,
         cwd: PathBuf,
         ctx: egui::Context,
-        mut command: CommandBuilder,
+        command: CommandBuilder,
         remote: Option<crate::connections::SshConfig>,
     ) -> Result<Self, String> {
-        let size = Size {
+        Self::spawn_command_with_previous(id, shell, cwd, ctx, command, remote, None)
+    }
+
+    fn spawn_command_with_previous(
+        id: u64,
+        shell: Profile,
+        cwd: PathBuf,
+        ctx: egui::Context,
+        mut command: CommandBuilder,
+        remote: Option<crate::connections::SshConfig>,
+        previous: Option<&Self>,
+    ) -> Result<Self, String> {
+        let size = previous.map(|session| session.size).unwrap_or(Size {
             cols: 100,
             rows: 28,
-        };
+        });
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: size.rows as u16,
@@ -282,12 +342,23 @@ impl Session {
             )
         })?;
         drop(pair.slave);
-        let (event_tx, events) = mpsc::channel();
-        let term = Arc::new(Mutex::new(Term::new(
-            Config::default(),
-            &size,
-            Proxy { tx: event_tx },
-        )));
+        let (next_event_tx, events) = mpsc::channel();
+        let event_tx = previous.map_or_else(
+            || Arc::new(Mutex::new(next_event_tx.clone())),
+            |session| session.event_tx.clone(),
+        );
+        let term = previous.map_or_else(
+            || {
+                Arc::new(Mutex::new(Term::new(
+                    Config::default(),
+                    &size,
+                    Proxy {
+                        tx: event_tx.clone(),
+                    },
+                )))
+            },
+            |session| session.term.clone(),
+        );
         // Bounded input queue keeps a stalled child from growing memory indefinitely.
         let (input, inputs) = mpsc::sync_channel::<Vec<u8>>(256);
         let (fail_tx, failures) = mpsc::channel();
@@ -356,6 +427,14 @@ impl Session {
                 ctx.request_repaint();
             })
             .map_err(|e| e.to_string())?;
+        // The preserved terminal owns this shared event route. Switch it only
+        // after the replacement PTY is fully ready, so a failed reconnect
+        // cannot leave the previous session without an event receiver.
+        if previous.is_some()
+            && let Ok(mut tx) = event_tx.lock()
+        {
+            *tx = next_event_tx;
+        }
         Ok(Self {
             id,
             shell,
@@ -370,6 +449,7 @@ impl Session {
             child: Some(child),
             input: Some(input),
             events,
+            event_tx,
             failures,
             error: None,
             exited: false,
@@ -379,23 +459,41 @@ impl Session {
             started: Instant::now(),
             scroll_remainder: 0.0,
             remote,
-            commands: Vec::new(),
+            commands: previous
+                .map(|session| session.commands.clone())
+                .unwrap_or_default(),
             chat_selection: None,
+            recovered_draft: previous.and_then(|session| session.recovered_draft.clone()),
+            disconnect_marked: false,
             search_position: None,
-            record_commands: true,
-            history_key: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                .to_string(),
-            palette: crate::palette::Palette::default(),
-            input_id: None,
+            record_commands: previous.is_none_or(|session| session.record_commands),
+            history_key: previous.map_or_else(
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos()
+                        .to_string()
+                },
+                |session| session.history_key.clone(),
+            ),
+            palette: previous.map_or_else(Default::default, |session| session.palette),
+            input_id: previous.and_then(|session| session.input_id),
             submitted_password: None,
             saved_password: None,
             auth_complete: false,
             directory_report,
             password_draft: crate::credentials::Secret::new(String::new()),
         })
+    }
+
+    pub fn append_notice(&self, text: &str) {
+        let Ok(mut term) = self.term.lock() else {
+            return;
+        };
+        let mut parser: Processor = Processor::new();
+        let notice = format!("\x1b[0m\x1b[?1049l\r\n\r\n\x1b[2m──── {text} ────\x1b[0m\r\n");
+        parser.advance(&mut *term, notice.as_bytes());
     }
 
     pub(crate) fn at_password_prompt(&self) -> bool {
