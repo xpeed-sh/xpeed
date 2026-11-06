@@ -434,18 +434,24 @@ fn composer(
         .corner_radius(22.0)
         .inner_margin(12.0)
         .show(ui, |ui| {
-            ui.add_enabled(
-                !runtime.busy,
-                egui::TextEdit::multiline(if new_chat {
-                    &mut runtime.home_draft
-                } else {
-                    &mut runtime.draft
-                })
-                .frame(false)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .hint_text(t("Ask for changes or a task…")),
-            );
+            egui::ScrollArea::vertical()
+                .id_salt(("codex_composer_draft", new_chat))
+                .max_height(144.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.add_enabled(
+                        !runtime.busy,
+                        egui::TextEdit::multiline(if new_chat {
+                            &mut runtime.home_draft
+                        } else {
+                            &mut runtime.draft
+                        })
+                        .frame(false)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(t("Ask for changes or a task…")),
+                    );
+                });
             ui.horizontal(|ui| {
                 let compact = ui.available_width() < 260.0;
                 ui.spacing_mut().item_spacing.x = 4.0;

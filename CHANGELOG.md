@@ -2,6 +2,7 @@
 
 ## Sin publicar
 
+- El cuadro de mensajes de Codex conserva una altura máxima tanto al iniciar un chat como dentro de una conversación. Los textos largos se desplazan dentro del editor y ya no estiran el panel hacia abajo.
 - Las conexiones SSH detectan cuando la identidad del servidor cambió y muestran una confirmación con las huellas guardada y presentada. XPEED solo elimina la entrada anterior de `known_hosts` y reconecta cuando el usuario lo confirma explícitamente.
 
 ## 0.11.3 - 2026-10-29
