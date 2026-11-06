@@ -1,5 +1,9 @@
 # Changelog
 
+## Sin publicar
+
+- Las conexiones SSH detectan cuando la identidad del servidor cambió y muestran una confirmación con las huellas guardada y presentada. XPEED solo elimina la entrada anterior de `known_hosts` y reconecta cuando el usuario lo confirma explícitamente.
+
 ## 0.11.3 - 2026-10-29
 
 - Las reconexiones reutilizan el mismo búfer de terminal: conservan toda la salida anterior, el historial desplazable, la selección y la posición de lectura en lugar de reemplazar la consola.

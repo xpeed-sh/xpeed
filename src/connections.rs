@@ -69,6 +69,40 @@ impl SshConfig {
             format!("{user}@{host}")
         }
     }
+    pub fn known_host_target(&self) -> String {
+        let host = Self::clean(&self.host);
+        if self.port == 22 {
+            host.into()
+        } else {
+            format!("[{host}]:{}", self.port)
+        }
+    }
+    pub fn forget_known_host(&self) -> Result<(), String> {
+        self.validate()?;
+        let mut command = std::process::Command::new("ssh-keygen");
+        command.args(["-R", &self.known_host_target()]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let output = command.output().map_err(|error| {
+            xpeed_i18n::format(
+                "No se pudo iniciar ssh-keygen: {error}",
+                &[("error", error.to_string())],
+            )
+        })?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if detail.is_empty() {
+                xpeed_i18n::t("No se pudo quitar la identidad anterior del servidor.").into()
+            } else {
+                detail
+            })
+        }
+    }
     pub fn command(&self) -> Result<CommandBuilder, String> {
         self.command_with_hosts(None)
     }
@@ -245,5 +279,26 @@ mod tests {
         let loaded: Connection = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.description(), "developer@localhost:2222");
         assert!(!json.contains("password"));
+    }
+    #[test]
+    fn known_host_target_includes_nonstandard_ports() {
+        assert_eq!(
+            SshConfig {
+                host: " server.example.org ".into(),
+                port: 22,
+                ..Default::default()
+            }
+            .known_host_target(),
+            "server.example.org"
+        );
+        assert_eq!(
+            SshConfig {
+                host: "2001:db8::1".into(),
+                port: 2222,
+                ..Default::default()
+            }
+            .known_host_target(),
+            "[2001:db8::1]:2222"
+        );
     }
 }

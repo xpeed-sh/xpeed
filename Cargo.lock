@@ -5109,6 +5109,7 @@ name = "xpeed"
 version = "0.11.3"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "eframe",

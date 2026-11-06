@@ -710,5 +710,16 @@
   "This text was not sent before the connection ended.": "Este texto no se envió antes de terminar la conexión.",
   "Insert again": "Insertar de nuevo",
   "Dismiss": "Descartar",
-  "New output ↓": "Nueva salida ↓"
+  "New output ↓": "Nueva salida ↓",
+  "La identidad del servidor cambió": "La identidad del servidor cambió",
+  "OpenSSH bloqueó la conexión con {host} porque su clave ya no coincide con la guardada.": "OpenSSH bloqueó la conexión con {host} porque su clave ya no coincide con la guardada.",
+  "Clave guardada": "Clave guardada",
+  "Clave presentada": "Clave presentada",
+  "No disponible": "No disponible",
+  "Reemplázala únicamente si reinstalaste o cambiaste el servidor y verificaste la nueva huella.": "Reemplázala únicamente si reinstalaste o cambiaste el servidor y verificaste la nueva huella.",
+  "Reemplazar clave guardada": "Reemplazar clave guardada",
+  "Copiar huellas": "Copiar huellas",
+  "Identidad SSH anterior eliminada; reconectando": "Identidad SSH anterior eliminada; reconectando",
+  "No se pudo iniciar ssh-keygen: {error}": "No se pudo iniciar ssh-keygen: {error}",
+  "No se pudo quitar la identidad anterior del servidor.": "No se pudo quitar la identidad anterior del servidor."
 }

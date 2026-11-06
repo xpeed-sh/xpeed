@@ -4,8 +4,12 @@ use alacritty_terminal::{
     term::{Config, Term, TermMode},
     vte::ansi::Processor,
 };
+use base64::{
+    Engine as _, engine::general_purpose::STANDARD, engine::general_purpose::STANDARD_NO_PAD,
+};
 use eframe::egui;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     path::PathBuf,
@@ -133,7 +137,16 @@ pub struct Session {
     pub saved_password: Option<crate::credentials::Secret>,
     pub auth_complete: bool,
     directory_report: Arc<Mutex<Option<String>>>,
+    diagnostic_output: Arc<Mutex<Vec<u8>>>,
     password_draft: crate::credentials::Secret,
+    pub host_key_change: Option<HostKeyChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostKeyChange {
+    pub host: String,
+    pub previous_fingerprint: Option<String>,
+    pub presented_fingerprint: String,
 }
 
 impl Session {
@@ -199,7 +212,9 @@ impl Session {
             saved_password: None,
             auth_complete: true,
             directory_report: Arc::new(Mutex::new(Some("/srv/demo".into()))),
+            diagnostic_output: Arc::new(Mutex::new(Vec::new())),
             password_draft: crate::credentials::Secret::new(String::new()),
+            host_key_change: None,
         })
     }
     #[cfg(test)]
@@ -384,6 +399,8 @@ impl Session {
         let reader_console = console.clone();
         let directory_report = Arc::new(Mutex::new(None));
         let reader_directory = directory_report.clone();
+        let diagnostic_output = Arc::new(Mutex::new(Vec::new()));
+        let reader_diagnostic = diagnostic_output.clone();
         thread::Builder::new()
             .name(format!("xpeed-output-{id}"))
             .spawn(move || {
@@ -403,6 +420,14 @@ impl Session {
                                 && let Ok(mut report) = reader_directory.lock()
                             {
                                 *report = Some(path);
+                            }
+                            if let Ok(mut diagnostic) = reader_diagnostic.lock() {
+                                diagnostic.extend_from_slice(&visible);
+                                const MAX_DIAGNOSTIC: usize = 64 * 1024;
+                                if diagnostic.len() > MAX_DIAGNOSTIC {
+                                    let excess = diagnostic.len() - MAX_DIAGNOSTIC;
+                                    diagnostic.drain(..excess);
+                                }
                             }
                             if let Ok(mut term) = reader_term.lock() {
                                 parser.advance(&mut *term, &visible);
@@ -483,7 +508,9 @@ impl Session {
             saved_password: None,
             auth_complete: false,
             directory_report,
+            diagnostic_output,
             password_draft: crate::credentials::Secret::new(String::new()),
+            host_key_change: None,
         })
     }
 
@@ -678,6 +705,14 @@ impl Session {
         while let Ok(error) = self.failures.try_recv() {
             self.error = Some(error);
         }
+        if self.host_key_change.is_none()
+            && self.exited
+            && !self.auth_complete
+            && let Some(config) = &self.remote
+            && let Ok(output) = self.diagnostic_output.lock()
+        {
+            self.host_key_change = detect_host_key_change(&output, config);
+        }
         if !self.exited
             && let Some(child) = &mut self.child
         {
@@ -787,6 +822,62 @@ impl Session {
             term.scroll_display(Scroll::Bottom);
         }
     }
+}
+
+fn detect_host_key_change(
+    output: &[u8],
+    config: &crate::connections::SshConfig,
+) -> Option<HostKeyChange> {
+    let text = String::from_utf8_lossy(output);
+    if !text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED!") {
+        return None;
+    }
+    let presented_fingerprint = text
+        .split_whitespace()
+        .find(|token| token.starts_with("SHA256:"))?
+        .trim_end_matches(|character: char| {
+            !character.is_ascii_alphanumeric() && !"+/=_-:".contains(character)
+        })
+        .to_string();
+    let offending_line = text.lines().find_map(|line| {
+        let marker = line.find(" key in ")?;
+        let (_, number) = line[marker + " key in ".len()..].rsplit_once(':')?;
+        number.trim().parse::<usize>().ok()
+    });
+    let previous_fingerprint = default_known_hosts_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|contents| {
+            offending_line
+                .and_then(|line| contents.lines().nth(line.saturating_sub(1)))
+                .and_then(fingerprint_known_host_line)
+                .or_else(|| {
+                    let target = config.known_host_target();
+                    contents.lines().find_map(|line| {
+                        let host_field = line.split_whitespace().next()?;
+                        host_field
+                            .split(',')
+                            .any(|host| host == target)
+                            .then(|| fingerprint_known_host_line(line))
+                            .flatten()
+                    })
+                })
+        });
+    Some(HostKeyChange {
+        host: config.known_host_target(),
+        previous_fingerprint,
+        presented_fingerprint,
+    })
+}
+
+fn default_known_hosts_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".ssh").join("known_hosts"))
+}
+
+fn fingerprint_known_host_line(line: &str) -> Option<String> {
+    let encoded = line.split_whitespace().nth(2)?;
+    let key = STANDARD.decode(encoded).ok()?;
+    let digest = Sha256::digest(key);
+    Some(format!("SHA256:{}", STANDARD_NO_PAD.encode(digest)))
 }
 
 impl Drop for Session {
@@ -928,6 +1019,43 @@ pub fn smoke_test() -> Result<(), String> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn changed_host_identity_is_extracted_from_openssh_output() {
+        let output = br#"@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+The fingerprint for the ED25519 key sent by the remote host is
+SHA256:5KU9edVUxarAYlauy07mZHDv9Kn5i2AL20Jy11F/Mik.
+Offending ED25519 key in C:\Users\tester/.ssh/known_hosts:1
+Host key verification failed.
+"#;
+        let issue = detect_host_key_change(
+            output,
+            &crate::connections::SshConfig {
+                host: "157.180.60.80".into(),
+                port: 22,
+                ..Default::default()
+            },
+        )
+        .expect("changed host identity");
+        assert_eq!(issue.host, "157.180.60.80");
+        assert_eq!(
+            issue.presented_fingerprint,
+            "SHA256:5KU9edVUxarAYlauy07mZHDv9Kn5i2AL20Jy11F/Mik"
+        );
+        assert!(detect_host_key_change(b"Permission denied", &Default::default()).is_none());
+    }
+
+    #[test]
+    fn known_host_public_key_is_rendered_as_an_openssh_fingerprint() {
+        let line = "157.180.60.80 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHX0c2/WHRdXiFQyf3l8D0N4DT9bs9nQ7X2c5Z4GgO85";
+        assert!(
+            fingerprint_known_host_line(line)
+                .is_some_and(|fingerprint| fingerprint.starts_with("SHA256:"))
+        );
+        assert!(fingerprint_known_host_line("invalid").is_none());
+    }
 
     #[test]
     fn reconnect_only_classifies_authenticated_transport_failure() {

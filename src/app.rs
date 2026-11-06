@@ -5,7 +5,7 @@ use crate::{
     palette::{Density, Mode, Palette},
     settings::Settings,
     sftp::RemoteExplorer,
-    terminal::{Profile, Session},
+    terminal::{HostKeyChange, Profile, Session},
     terminal_view::terminal_view,
     workspace::{self, Pane, Snapshot},
 };
@@ -156,6 +156,7 @@ pub struct Xpeed {
     access_candidates: BTreeMap<u64, crate::credentials::Secret>,
     access_handled: BTreeSet<u64>,
     access_prompt: Option<u64>,
+    host_key_prompt: Option<(u64, HostKeyChange)>,
     assistant: Assistant,
     extensions: crate::extensions::Extensions,
     monitor: Option<crate::server_monitor::Worker>,
@@ -437,6 +438,7 @@ impl Xpeed {
             access_candidates: BTreeMap::new(),
             access_handled: BTreeSet::new(),
             access_prompt: None,
+            host_key_prompt: None,
             assistant: Assistant::default(),
             extensions: crate::extensions::Extensions::new(&cwd, ephemeral),
             monitor: None,
@@ -872,6 +874,13 @@ impl Xpeed {
         self.access_handled.remove(&id);
         if self.access_prompt == Some(id) {
             self.access_prompt = None;
+        }
+        if self
+            .host_key_prompt
+            .as_ref()
+            .is_some_and(|(session, _)| *session == id)
+        {
+            self.host_key_prompt = None;
         }
         if let Some(source) = self.sources.remove(&id) {
             self.log(xpeed_i18n::format(
@@ -2039,6 +2048,7 @@ impl Xpeed {
         }
     }
     fn overlays(&mut self, ctx: &egui::Context) {
+        self.host_key_window(ctx);
         self.access_window(ctx);
 
         self.connection_window(ctx);
@@ -2061,6 +2071,115 @@ impl Xpeed {
             if !open {
                 self.notice = None;
             }
+        }
+    }
+    fn host_key_window(&mut self, ctx: &egui::Context) {
+        let Some((id, issue)) = self.host_key_prompt.clone() else {
+            return;
+        };
+        let p = self.palette();
+        let mut replace = false;
+        let mut cancel = false;
+        let mut copy = false;
+        let modal = egui::Modal::new(egui::Id::new("ssh_host_key_changed")).show(ctx, |ui| {
+            ui.set_width(470.0);
+            ui.heading(xpeed_i18n::t("La identidad del servidor cambió"));
+            ui.add_space(4.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(xpeed_i18n::format(
+                        "OpenSSH bloqueó la conexión con {host} porque su clave ya no coincide con la guardada.",
+                        &[("host", issue.host.clone())],
+                    ))
+                    .color(p.muted),
+                )
+                .wrap(),
+            );
+            ui.add_space(12.0);
+            egui::Grid::new("ssh_host_key_fingerprints")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label(xpeed_i18n::t("Clave guardada"));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                issue
+                                    .previous_fingerprint
+                                    .as_deref()
+                                    .unwrap_or(xpeed_i18n::t("No disponible")),
+                            )
+                            .monospace()
+                            .small(),
+                        )
+                        .wrap(),
+                    );
+                    ui.end_row();
+                    ui.label(xpeed_i18n::t("Clave presentada"));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&issue.presented_fingerprint)
+                                .monospace()
+                                .small()
+                                .color(p.accent),
+                        )
+                        .wrap(),
+                    );
+                    ui.end_row();
+                });
+            ui.add_space(12.0);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(xpeed_i18n::t(
+                        "Reemplázala únicamente si reinstalaste o cambiaste el servidor y verificaste la nueva huella.",
+                    ))
+                    .strong(),
+                )
+                .wrap(),
+            );
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                replace = ui
+                    .button(xpeed_i18n::t("Reemplazar clave guardada"))
+                    .clicked();
+                cancel = ui.button(xpeed_i18n::t("Cancelar")).clicked();
+                copy = ui.button(xpeed_i18n::t("Copiar huellas")).clicked();
+            });
+        });
+        cancel |= modal.should_close();
+        if copy {
+            ctx.copy_text(format!(
+                "{}: {}\n{}: {}",
+                xpeed_i18n::t("Clave guardada"),
+                issue
+                    .previous_fingerprint
+                    .as_deref()
+                    .unwrap_or(xpeed_i18n::t("No disponible")),
+                xpeed_i18n::t("Clave presentada"),
+                issue.presented_fingerprint
+            ));
+        }
+        if replace {
+            let result = self.sources.get(&id).and_then(|source| {
+                if let Target::Ssh(config) = &source.target {
+                    Some(config.forget_known_host())
+                } else {
+                    None
+                }
+            });
+            match result {
+                Some(Ok(())) => {
+                    self.host_key_prompt = None;
+                    self.log(
+                        xpeed_i18n::t("Identidad SSH anterior eliminada; reconectando").into(),
+                    );
+                    self.action(Action::Reconnect(id), ctx);
+                }
+                Some(Err(error)) => self.notice = Some(error),
+                None => self.host_key_prompt = None,
+            }
+        } else if cancel {
+            self.host_key_prompt = None;
         }
     }
     fn access_window(&mut self, ctx: &egui::Context) {
@@ -2548,6 +2667,14 @@ impl Xpeed {
         self.extensions.language_changed(self.settings.language);
         for session in self.sessions.values_mut() {
             session.poll();
+        }
+        if self.host_key_prompt.is_none()
+            && let Some((id, issue)) = self
+                .sessions
+                .iter_mut()
+                .find_map(|(&id, session)| session.host_key_change.take().map(|issue| (id, issue)))
+        {
+            self.host_key_prompt = Some((id, issue));
         }
         self.extensions.sessions(
             self.sessions
