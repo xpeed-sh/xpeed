@@ -4,7 +4,7 @@
 
 | Extensión | Versión del adaptador | Documentación | Historial |
 | --- | --- | --- | --- |
-| Codex | 0.3.2 | [README](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md) | [CHANGELOG](https://github.com/xpeed-sh/extension-codex/blob/main/CHANGELOG.md) |
+| Codex | 0.3.4 | [README](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md) | [CHANGELOG](https://github.com/xpeed-sh/extension-codex/blob/main/CHANGELOG.md) |
 | Monitor del servidor | 0.1.3 | [README](https://github.com/xpeed-sh/extension-server-monitor/blob/main/README.es.md) | [CHANGELOG](https://github.com/xpeed-sh/extension-server-monitor/blob/main/CHANGELOG.md) |
 
 Cada extensión mantiene VERSION, Cargo.toml y extension.json sincronizados en su propio repositorio: `xpeed-sh/extension-codex` y `xpeed-sh/extension-server-monitor`. El repositorio principal ignora por completo `extensions/`; puedes clonar allí esos proyectos para desarrollarlos y probarlos localmente sin volver a publicarlos con Xpeed. Las pruebas del núcleo usan manifiestos mínimos en `src/extensions/fixtures`. Los cambios de interfaz implementados en el host se registran en el changelog de Xpeed.
@@ -13,7 +13,7 @@ Las secciones con números de versión describen la evolución del contrato. Act
 
 ## Herramientas de sesiones (0.8.0)
 
-Codex 0.3.2 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta su [instalación, permisos y limitaciones](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md), incluidas las versiones compatibles del runtime oficial.
+Codex 0.3.4 usa ChatGPT y herramientas del host para sesiones seleccionadas. Consulta su [instalación, permisos y limitaciones](https://github.com/xpeed-sh/extension-codex/blob/main/README.es.md), incluidas las versiones compatibles del runtime oficial.
 
 Una extensión solicita acceso con la capacidad `sessionTools` y el permiso `sessions.tools`. El host genera `scopeToken` cuando el usuario selecciona destinos para una conversación. Sus metadatos públicos contienen ID, nombre, tipo, estado, host, shell y directorio; no incluyen contraseñas, claves ni objetos de terminal.
 

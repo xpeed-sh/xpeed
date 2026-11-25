@@ -519,7 +519,7 @@
   "A selected session is disconnected.": "A selected session is disconnected.",
   "A session disconnected during this conversation. Start a new conversation before reconnecting.": "A session disconnected during this conversation. Start a new conversation before reconnecting.",
   "Cannot find a private user directory for Codex sign-in.": "Cannot find a private user directory for Codex sign-in.",
-  "XPEED Codex requires Codex {version} for scoped session tools. Detected: {detected}. Configure its executable in Extensions.": "XPEED Codex requires Codex {version} for scoped session tools. Detected: {detected}. Configure its executable in Extensions.",
+  "Codex requires Codex {version} or newer for scoped session tools. Detected: {detected}. Configure its executable in Extensions.": "Codex requires Codex {version} or newer for scoped session tools. Detected: {detected}. Configure its executable in Extensions.",
   "Account usage limits": "Account usage limits",
   "Welcome to XPEED Codex": "Welcome to XPEED Codex",
   "Sign in to get started": "Sign in to get started",
