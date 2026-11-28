@@ -126,11 +126,14 @@ Sin `--mock`, el script solo comprueba initialize, estado de cuenta y modelos co
 
 La columna derecha contiene vistas independientes **IA**, **Xpeed** y **Servidor**. IA agrupa los proveedores de chat instalados en pestañas. Claude aparece cuando se instala un adaptador compatible; no viene integrado. Servidor muestra metadatos de la conexión seleccionada, no métricas remotas de CPU o memoria.
 
-Una extensión puede añadir vistas sin declarar la capacidad `chat`. El campo opcional `views` del manifiesto contiene hasta 16 vistas con ID único por paquete, título y ubicación inicial:
+Una extensión puede añadir vistas sin declarar la capacidad `chat`. El campo opcional `views` del manifiesto admite hasta 16 vistas con ID único por paquete, título y ubicación inicial.
+
+Las vistas de la derecha pueden declarar `contextActions` como una lista de hasta 12 objetos con `id` y `title`. Al elegir una acción, XPEED envía la solicitud `views/action` con `{viewId, actionId}` al proceso de esa extensión. La respuesta puede incluir el mismo contenido que `views/read`. El menú no envía la selección, el portapapeles ni credenciales.
 
 ```json
 "views": [
-  {"id":"status", "title":"Estado", "location":"right"},
+  {"id":"status", "title":"Estado", "location":"right",
+   "contextActions":[{"id":"refresh", "title":"Actualizar estado"}]},
   {"id":"navigation", "title":"Navegación", "location":"left"},
   {"id":"report", "title":"Informe", "location":"center"}
 ]

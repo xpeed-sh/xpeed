@@ -66,25 +66,29 @@ pub fn show(ui: &mut egui::Ui, dashboard: &Dashboard, state: &mut State) {
     let color = ui.visuals().selection.stroke.color;
     for metric in &dashboard.metrics {
         ui.add_space(5.);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(xpeed_i18n::t(&metric.label)).strong());
             ui.label(xpeed_i18n::t(&metric.display));
         });
         let (rect, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 45.), egui::Sense::hover());
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.), egui::Sense::hover());
         ui.painter()
             .rect_filled(rect, 5, ui.visuals().faint_bg_color);
-        if metric.history.len() > 1 {
+        let plot = rect.shrink(4.0);
+        let y_at =
+            |value: f64| plot.bottom() - (value / metric.max).clamp(0., 1.) as f32 * plot.height();
+        if let [value] = metric.history.as_slice() {
+            ui.painter()
+                .circle_filled(egui::pos2(plot.right(), y_at(*value)), 2.5, color);
+        } else if metric.history.len() > 1 {
             let points = metric
                 .history
                 .iter()
                 .enumerate()
                 .map(|(i, value)| {
                     egui::pos2(
-                        rect.left() + i as f32 / (metric.history.len() - 1) as f32 * rect.width(),
-                        rect.bottom()
-                            - ((*value / metric.max).clamp(0., 1.) as f32 * (rect.height() - 4.))
-                            - 2.,
+                        plot.left() + i as f32 / (metric.history.len() - 1) as f32 * plot.width(),
+                        y_at(*value),
                     )
                 })
                 .collect();
@@ -101,11 +105,14 @@ pub fn show(ui: &mut egui::Ui, dashboard: &Dashboard, state: &mut State) {
         ui.selectable_value(&mut state.memory_sort, false, xpeed_i18n::t("CPU"));
         ui.selectable_value(&mut state.memory_sort, true, xpeed_i18n::t("RAM"));
     });
-    ui.add(
-        egui::TextEdit::singleline(&mut state.filter)
-            .hint_text(xpeed_i18n::t("Buscar proceso o PID"))
-            .desired_width(f32::INFINITY),
-    );
+    let editor = ui.make_persistent_id("process_filter");
+    super::panel_menu::before_editor(ui, editor, &mut state.filter);
+    let output = egui::TextEdit::singleline(&mut state.filter)
+        .id(editor)
+        .hint_text(xpeed_i18n::t("Buscar proceso o PID"))
+        .desired_width(f32::INFINITY)
+        .show(ui);
+    super::panel_menu::remember_editor(ui, &state.filter, &output);
     let filter = state.filter.to_lowercase();
     let mut processes: Vec<_> = dashboard
         .processes

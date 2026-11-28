@@ -6,6 +6,7 @@ mod dashboard;
 mod git;
 mod manager;
 mod markdown;
+mod panel_menu;
 mod rpc;
 pub mod session_tools;
 use eframe::egui::{self, RichText};
@@ -56,6 +57,17 @@ pub struct View {
     pub icon: Option<ViewIcon>,
     #[serde(default)]
     pub panel: Option<String>,
+    #[serde(
+        default,
+        rename = "contextActions",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub context_actions: Vec<ContextAction>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ContextAction {
+    pub id: String,
+    pub title: String,
 }
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -100,6 +112,7 @@ impl View {
             location: ViewLocation::Right,
             icon: None,
             panel: None,
+            context_actions: Vec::new(),
         }
     }
     pub fn key(&self, extension: &str) -> u64 {
@@ -233,6 +246,20 @@ impl Manifest {
                         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
                     || view.title.trim().is_empty()
                     || view.title.len() > 80
+                    || view.context_actions.len() > 12
+                    || {
+                        let mut actions = std::collections::BTreeSet::new();
+                        view.context_actions.iter().any(|action| {
+                            action.id.is_empty()
+                                || action.id.len() > 80
+                                || !action.id.bytes().all(|byte| {
+                                    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+                                })
+                                || action.title.trim().is_empty()
+                                || action.title.len() > 80
+                                || !actions.insert(&action.id)
+                        })
+                    }
                     || view.panel.as_ref().is_some_and(|panel| {
                         panel.is_empty()
                             || panel.len() > 80
@@ -663,7 +690,7 @@ impl Runtime {
                         })
                         .unwrap_or_default();
                 }
-                "views/read" => self.update_view(result),
+                "views/read" | "views/action" => self.update_view(result),
                 _ => {}
             }
             return;
@@ -779,11 +806,10 @@ impl Runtime {
             .capabilities
             .iter()
             .any(|c| c == "serverMetrics")
-            && self
-                .manifest
-                .permissions
-                .iter()
-                .any(|p| p == "server.metrics.read")
+            && self.manifest.permissions.iter().any(|p| {
+                p == "server.metrics.read"
+                    || (self.manifest.id == "xpeed.server-monitor" && p == "Read server metrics")
+            })
     }
     fn take_deferred_results(&mut self) -> Vec<Value> {
         if self.deferred_actions.iter().any(|index| {
@@ -909,6 +935,27 @@ impl Extensions {
         runtime.view_dashboards.insert("monitor".into(), data);
         self.runtimes.insert(runtime.manifest.id.clone(), runtime);
         Ok(())
+    }
+    #[cfg(test)]
+    pub fn performance_chat(&mut self, turns: usize) -> u64 {
+        let manifest: Manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
+        let key = View::chat(manifest.name()).key(&manifest.id);
+        let mut runtime = Runtime::new(manifest, PathBuf::new(), true, &self.cwd, String::new());
+        runtime.ready = true;
+        runtime.account = Some(json!({"type":"preview"}));
+        runtime.chat_page = chat::Page::Chat;
+        for index in 0..turns {
+            runtime.message(
+                &format!("user-{index}"),
+                "user",
+                "Inspect the application logs.",
+                false,
+            );
+            runtime.message(&format!("reply-{index}"), "assistant",
+                "### Result\n\nThe service is running. **No errors** in the latest sample.\n\n- Request count: 18\n- Average latency: 120 ms\n\n```text\nGET /health 200\n```", false);
+        }
+        self.runtimes.insert(runtime.manifest.id.clone(), runtime);
+        key
     }
     pub fn preview_codex(
         &mut self,
@@ -1144,6 +1191,53 @@ impl Extensions {
             .find(|(id, _)| *id == key)
             .map_or_else(|| xpeed_i18n::t("Extensión").into(), |(_, view)| view.title)
     }
+    pub fn server_monitor_ui(&mut self, ui: &mut egui::Ui, session_id: u64) {
+        let current = self.server_context["sessionId"].as_u64() == Some(session_id);
+        let Some((runtime, view)) = self
+            .runtimes
+            .values_mut()
+            .filter(|runtime| runtime.enabled && runtime.metrics_allowed())
+            .find_map(|runtime| {
+                let view = runtime
+                    .manifest
+                    .views
+                    .iter()
+                    .find(|view| view.location == ViewLocation::Server)?
+                    .id
+                    .clone();
+                Some((runtime, view))
+            })
+        else {
+            return;
+        };
+        ui.separator();
+        Self::metrics_ui(ui, runtime, &view, current);
+    }
+
+    fn metrics_ui(ui: &mut egui::Ui, runtime: &mut Runtime, view: &str, current: bool) {
+        if runtime.process.is_none()
+            && runtime.error.is_none()
+            && !runtime.ready
+            && runtime
+                .view_dashboards
+                .get(view)
+                .is_none_or(|data| data.context_id.is_none())
+        {
+            runtime.connect(ui.ctx());
+        }
+        runtime.metrics_visible = true;
+        if let Some(error) = &runtime.error {
+            ui.add(egui::Label::new(error).wrap());
+        } else if current
+            && let Some(data) = runtime.view_dashboards.get(view)
+            && data.context_id.is_some()
+        {
+            dashboard::show(ui, data, &mut runtime.dashboard_state);
+        } else {
+            ui.label(xpeed_i18n::t("Conectando al servidor…"));
+        }
+    }
+
     pub fn view_ui(&mut self, ui: &mut egui::Ui, key: u64) {
         if let Some(id) = self.runtimes.iter().find_map(|(id, runtime)| {
             (runtime.enabled
@@ -1151,9 +1245,15 @@ impl Extensions {
                 && View::chat(runtime.manifest.name()).key(id) == key)
                 .then(|| id.clone())
         }) {
-            self.selected = Some(id);
+            self.selected = Some(id.clone());
             self.legacy = false;
+            let menu = panel_menu::Menu::begin(ui, true);
             self.chat_ui(ui, None);
+            if let Some(menu) = menu
+                && let Some(runtime) = self.runtimes.get_mut(&id)
+            {
+                menu.show(ui, |ui| chat::context_actions(runtime, ui, &self.targets));
+            }
             return;
         }
         let Some((runtime, view)) = self
@@ -1173,7 +1273,67 @@ impl Extensions {
             ui.label(xpeed_i18n::t("Esta vista ya no está disponible."));
             return;
         };
-        runtime.metrics_visible = true;
+        let menu = panel_menu::Menu::begin(
+            ui,
+            matches!(
+                view.location,
+                ViewLocation::Right | ViewLocation::RightTab | ViewLocation::Server
+            ),
+        );
+        Self::view_contents(
+            ui,
+            runtime,
+            &view,
+            key,
+            !self.server_context["id"].is_null(),
+        );
+        if let Some(menu) = menu {
+            menu.show(ui, |ui| {
+                if !view.context_actions.is_empty() {
+                    ui.separator();
+                }
+                for action in &view.context_actions {
+                    if ui
+                        .add_enabled(
+                            runtime.ready,
+                            egui::Button::new(xpeed_i18n::t(&action.title)),
+                        )
+                        .clicked()
+                    {
+                        runtime.request(
+                            "views/action",
+                            json!({"viewId":view.id,"actionId":action.id}),
+                        );
+                        ui.close();
+                    }
+                }
+            });
+        }
+    }
+
+    fn view_contents(
+        ui: &mut egui::Ui,
+        runtime: &mut Runtime,
+        view: &View,
+        key: u64,
+        connected: bool,
+    ) {
+        if runtime.metrics_allowed() && view.location == ViewLocation::Server {
+            if !connected
+                && runtime
+                    .view_dashboards
+                    .get(&view.id)
+                    .is_none_or(|data| data.context_id.is_none())
+            {
+                ui.label(xpeed_i18n::t("Selecciona una pestaña SSH autenticada."));
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt(("extension_view", key))
+                    .scroll_source(panel_menu::TEXT_SCROLL)
+                    .show(ui, |ui| Self::metrics_ui(ui, runtime, &view.id, true));
+            }
+            return;
+        }
         ui.label(RichText::new(runtime.manifest.name()).small());
         if runtime.process.is_none() {
             if ui.button(xpeed_i18n::t("Conectar extensión")).clicked() {
@@ -1197,6 +1357,7 @@ impl Extensions {
         ui.separator();
         egui::ScrollArea::vertical()
             .id_salt(("extension_view", key))
+            .scroll_source(panel_menu::TEXT_SCROLL)
             .show(ui, |ui| {
                 if let Some(data) = runtime.view_dashboards.get(&view.id) {
                     dashboard::show(ui, data, &mut runtime.dashboard_state);
@@ -1744,6 +1905,7 @@ impl Extensions {
         let content_height = (ui.available_height() - 190.0).max(40.0);
         egui::ScrollArea::vertical()
             .id_salt(("extension_chat_content", &runtime.manifest.id))
+            .scroll_source(panel_menu::TEXT_SCROLL)
             .max_height(content_height)
             .auto_shrink([false, false])
             .stick_to_bottom(true)
@@ -1973,6 +2135,7 @@ impl Extensions {
         let height = (content_height * 0.4).clamp(40.0, 220.0);
         egui::ScrollArea::vertical()
             .id_salt(("extension_chat", &runtime.manifest.id))
+            .scroll_source(panel_menu::TEXT_SCROLL)
             .max_height(height)
             .min_scrolled_height(30.0)
             .stick_to_bottom(true)
@@ -2471,6 +2634,7 @@ mod tests {
             location: ViewLocation::Right,
             icon: None,
             panel: None,
+            context_actions: Vec::new(),
         });
         assert!(manifest.validate().is_ok());
         let key = manifest.views[0].key(&manifest.id);
@@ -2508,7 +2672,7 @@ mod tests {
     fn metrics_require_declared_access_and_reject_previous_server_dashboards() {
         let mut manifest: Manifest =
             serde_json::from_str(include_str!("fixtures/server-monitor.json")).unwrap();
-        manifest.permissions.clear();
+        let published_permissions = std::mem::take(&mut manifest.permissions);
         let mut runtime = Runtime::new(
             manifest,
             PathBuf::new(),
@@ -2524,11 +2688,16 @@ mod tests {
             .insert("xpeed.server-monitor".into(), runtime);
         assert!(!extensions.take_metrics_interest());
         let runtime = extensions.runtimes.get_mut("xpeed.server-monitor").unwrap();
-        runtime
-            .manifest
-            .permissions
-            .push("server.metrics.read".into());
-        runtime.metrics_visible = true;
+        runtime.manifest.permissions = published_permissions;
+        runtime.manifest.id = "test.unrelated".into();
+        assert!(!runtime.metrics_allowed());
+        runtime.manifest.id = "xpeed.server-monitor".into();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                extensions.server_monitor_ui(ui, 1);
+            });
+        });
         assert!(extensions.take_metrics_interest());
         extensions.server_context(json!({"id":2,"observing":true}));
         let runtime = extensions.runtimes.get_mut("xpeed.server-monitor").unwrap();

@@ -378,7 +378,7 @@ pub fn add_terminal(
     tree.make_active(|_, tile| *tile == Tile::Pane(Pane::Terminal(id)));
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     #[serde(default)]
     pub layout_version: u32,
@@ -386,6 +386,39 @@ pub struct Snapshot {
     pub sources: BTreeMap<u64, Connection>,
     #[serde(default)]
     pub sidebar_tree: Option<Tree<Pane>>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SavedWorkspace {
+    pub snapshot: Snapshot,
+    pub focused: Option<u64>,
+    pub sidebar_visible: bool,
+    pub sidebar_width: f32,
+}
+
+pub type SavedWorkspaces = BTreeMap<String, SavedWorkspace>;
+
+fn saved_workspaces_path() -> Option<PathBuf> {
+    Snapshot::path().map(|path| path.with_file_name("saved-workspaces.json"))
+}
+
+pub fn load_saved() -> SavedWorkspaces {
+    let Some(mut saved) = saved_workspaces_path()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<SavedWorkspaces>(&bytes).ok())
+    else {
+        return SavedWorkspaces::new();
+    };
+    saved.retain(|_, entry| entry.snapshot.validate());
+    saved
+}
+
+pub fn save_named(saved: &SavedWorkspaces) -> Result<(), String> {
+    Snapshot::write(
+        saved_workspaces_path()
+            .ok_or(xpeed_i18n::t("No se encontró la carpeta de configuración"))?,
+        saved,
+    )
 }
 
 fn widen_right_column(tree: &mut Tree<Pane>) {
@@ -430,24 +463,8 @@ impl Snapshot {
         let mut snapshot: Self = Self::path()
             .and_then(|p| std::fs::read(p).ok())
             .and_then(|b| serde_json::from_slice(&b).ok())?;
-        // Reject inconsistent structures before giving persisted data to the dock renderer.
-        if snapshot.tree.tiles.len() > 512 || snapshot.sources.len() > 64 {
+        if !snapshot.validate_tree() {
             return None;
-        }
-        let root = snapshot.tree.root?;
-        let mut visited = std::collections::HashSet::new();
-        let mut pending = vec![root];
-        while let Some(id) = pending.pop() {
-            if !visited.insert(id) {
-                return None;
-            }
-            match snapshot.tree.tiles.get(id)? {
-                Tile::Container(container) => pending.extend(container.children().copied()),
-                Tile::Pane(Pane::Terminal(id)) if !snapshot.sources.contains_key(id) => {
-                    return None;
-                }
-                _ => {}
-            }
         }
         if snapshot
             .sidebar_tree
@@ -466,15 +483,51 @@ impl Snapshot {
         }
         Some(snapshot)
     }
+    pub fn validate(&self) -> bool {
+        self.validate_tree() && self.sidebar_tree.as_ref().is_none_or(valid_sidebar)
+    }
+
+    fn validate_tree(&self) -> bool {
+        if self.tree.tiles.len() > 512 || self.sources.len() > 64 {
+            return false;
+        }
+        let Some(root) = self.tree.root else {
+            return false;
+        };
+        let mut visited = std::collections::HashSet::new();
+        let mut terminals = std::collections::HashSet::new();
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                return false;
+            }
+            match self.tree.tiles.get(id) {
+                Some(Tile::Container(container)) => pending.extend(container.children().copied()),
+                Some(Tile::Pane(Pane::Terminal(id))) => {
+                    if !self.sources.contains_key(id) || !terminals.insert(*id) {
+                        return false;
+                    }
+                }
+                Some(Tile::Pane(_)) => {}
+                None => return false,
+            }
+        }
+        true
+    }
+
     pub fn save(&self) -> Result<(), String> {
         let path =
             Self::path().ok_or(xpeed_i18n::t("No se encontró la carpeta de configuración"))?;
+        Self::write(path, self)
+    }
+
+    fn write(path: PathBuf, value: &impl Serialize) -> Result<(), String> {
         std::fs::create_dir_all(path.parent().ok_or(xpeed_i18n::t("Ruta inválida"))?)
             .map_err(|e| e.to_string())?;
         let temp = path.with_extension("tmp");
         std::fs::write(
             &temp,
-            serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?,
+            serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
         std::fs::rename(temp, path).map_err(|e| e.to_string())

@@ -19,17 +19,17 @@ parser.add_argument('--extension', required=True)
 parser.add_argument('--samples', help='Optional output of the collector on real local Linux')
 args = parser.parse_args()
 
-def fixture(second=False):
+def fixture(index=0):
     fields = ['0'] * 22
-    fields[0], fields[11], fields[19], fields[21] = 'R', '30' if second else '10', '1', '100'
-    return ('CPU\n' + ('cpu 20 0 30 150 0 0 0 0\n' if second else 'cpu 10 0 20 70 0 0 0 0\n')
+    fields[0], fields[11], fields[19], fields[21] = 'R', str(10 + 20 * index), '1', '100'
+    return (f'CPU\ncpu {10 + 10 * index} 0 {20 + 10 * index} {70 + 80 * index} 0 0 0 0\n'
             + 'MEMORY\nMemTotal: 1024 kB\nMemAvailable: 512 kB\nUPTIME\n'
-            + ('4 0\n' if second else '2 0\n')
+            + f'{2 * (index + 1)} 0\n'
             + 'NETWORK\neth0: 100 0 0 0 0 0 0 0 100 0 0 0 0 0 0 0\n'
             + 'DISK\n/dev/vda 1024 512 512 50% /\nPAGESIZE\n4096\nPROCESSES\n123 (worker) '
             + ' '.join(fields) + '\n')
 
-samples = [fixture(), fixture(True), fixture(True)]
+samples = [fixture(index) for index in range(3)]
 if args.samples:
     text = Path(args.samples).read_text(encoding='utf-8')
     samples = [block.split('END\n', 1)[0] for block in text.split('BEGIN\n')[1:] if 'END\n' in block]

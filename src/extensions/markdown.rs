@@ -82,6 +82,7 @@ fn prose(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
         let width = ui.available_width().max(1.0);
         ui.push_id(("responsive_table", index), |ui| {
             egui::ScrollArea::horizontal()
+                .scroll_source(super::panel_menu::TEXT_SCROLL)
                 .auto_shrink([false, true])
                 .max_width(width)
                 .show(ui, |ui| {
@@ -134,7 +135,12 @@ pub(super) fn show(ui: &mut egui::Ui, cache: &mut CommonMarkCache, text: &str) {
                             &language,
                         );
                         job.wrap.max_width = ui.available_width();
-                        ui.add(egui::Label::new(job).wrap().selectable(true));
+                        ui.add(
+                            egui::Label::new(job)
+                                .wrap()
+                                .selectable(true)
+                                .sense(egui::Sense::drag()),
+                        );
                     });
             });
             end = range.end;

@@ -2,6 +2,30 @@
 
 ## Sin publicar
 
+## 0.12.0 - 2026-11-28
+
+- Espacios de trabajo guardados con conexiones y distribución, accesibles desde Inicio y Vista.
+- Comandos favoritos globales o por conexión, con nombre, descripción e inserción en la terminal.
+- Búsqueda en todas las terminales abiertas y salto al resultado de cada sesión.
+- Diagnóstico SSH en la terminal con motivo, progreso de los reintentos y acceso a la reconexión manual.
+- Comparación de cambios en el editor remoto y revisión de conflictos antes de reemplazar una versión modificada en el servidor.
+
+- La selección de preguntas, respuestas y texto en paneles de extensiones se conserva al abrir el menú contextual, y arrastrar sobre el texto selecciona en vez de mover el historial.
+
+- Los paneles derechos de extensiones permiten seleccionar texto y usar un menú contextual de portapapeles. Codex añade selección de sesiones y creación de chats con o sin el contexto de la conversación actual.
+
+- Archivos muestra una cola SFTP por sesión con velocidad y reintento de los elementos sin completar. Las subidas grandes pueden continuar desde un temporal verificado durante la misma ejecución de XPEED.
+- La ficha Servidor reúne el diagnóstico de SSH, SFTP y Monitor. Ajustes muestra el percentil 95 de los tiempos recientes de la interfaz.
+
+- Codex convierte pegados de más de 80 líneas o 4.000 caracteres en adjuntos temporales en memoria, con el límite de adjuntos existente.
+- La ficha Servidor muestra automáticamente las gráficas del Monitor instalado para la sesión SSH activa. Las gráficas muestran un punto desde la primera medición disponible.
+- Copiar texto de otros paneles no interrumpe la terminal.
+- La selección de la terminal empieza donde se pulsa y desplaza el historial al mantener el arrastre cerca de un borde.
+- La reconexión SSH abandona intentos sin respuesta y continúa con el siguiente intento programado.
+
+- El chat de Codex ajusta el historial al espacio que ocupan el borrador, los adjuntos y las aprobaciones.
+- El actualizador permite reintentar la descarga o la apertura del instalador y muestra el aviso de instalador ausente solo cuando corresponde.
+
 ## 0.11.4 - 2026-11-06
 
 - El cuadro de mensajes de Codex conserva una altura máxima tanto al iniciar un chat como dentro de una conversación. Los textos largos se desplazan dentro del editor y ya no estiran el panel hacia abajo.

@@ -144,7 +144,7 @@ impl SshConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Target {
     Local { shell: Profile, directory: String },
     Ssh(SshConfig),

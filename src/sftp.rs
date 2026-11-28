@@ -1,8 +1,9 @@
 //! SFTP v3 over OpenSSH, with explicit server-side archive jobs over SSH.
 use crate::connections::SshConfig;
+use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::{Read, Write},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    io::{Read, Seek, SeekFrom, Write},
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -159,6 +160,57 @@ fn mutate_streams(
     }
     Ok(())
 }
+type TransferFile = (std::path::PathBuf, String);
+
+struct TransferBatch {
+    files: Vec<TransferFile>,
+    directories: Vec<String>,
+    download: bool,
+    resume: Option<UploadResume>,
+}
+
+#[derive(Clone)]
+struct UploadResume {
+    temporary: String,
+    checksum: [u8; 32],
+    acknowledged: u64,
+}
+
+#[derive(Default)]
+struct TransferProgress {
+    completed: usize,
+    directories_created: usize,
+    file_start_bytes: u64,
+    file_started: Option<std::time::Instant>,
+    file_total: Option<u64>,
+    resume: Option<UploadResume>,
+}
+
+struct ActiveTransfer {
+    batch: TransferBatch,
+    progress: Arc<Mutex<TransferProgress>>,
+    resumed_bytes: Arc<AtomicU64>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TransferState {
+    Queued,
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Clone)]
+pub struct TransferRow {
+    pub path: String,
+    pub download: bool,
+    pub state: TransferState,
+    pub bytes: u64,
+    pub total: Option<u64>,
+    pub bytes_per_second: u64,
+    pub error: Option<String>,
+}
+
 pub struct RemoteExplorer {
     pub browser: crate::file_explorer::Browser,
     config: SshConfig,
@@ -187,6 +239,10 @@ pub struct RemoteExplorer {
     worker: Option<ListWorker>,
     operation: Option<Receiver<Result<(), String>>>,
     operation_cancel: Option<Arc<AtomicBool>>,
+    transfer_queue: VecDeque<TransferBatch>,
+    active_transfer: Option<ActiveTransfer>,
+    failed_transfers: Vec<(TransferBatch, String)>,
+    completed_transfers: VecDeque<TransferRow>,
 }
 impl RemoteExplorer {
     pub fn new(config: SshConfig) -> Self {
@@ -223,6 +279,10 @@ impl RemoteExplorer {
             worker: None,
             operation: None,
             operation_cancel: None,
+            transfer_queue: VecDeque::new(),
+            active_transfer: None,
+            failed_transfers: Vec::new(),
+            completed_transfers: VecDeque::new(),
         }
     }
     // In-memory fixture for isolated screenshots and UI tests; opens no transport.
@@ -353,6 +413,11 @@ impl RemoteExplorer {
     pub fn connection(&self) -> SshConfig {
         self.config.clone()
     }
+    pub fn refresh_after_reconnect(&mut self) {
+        self.authenticated = false;
+        self.worker = None;
+        self.refresh();
+    }
     pub fn cancel_operation(&self) {
         if let Some(cancel) = &self.operation_cancel {
             cancel.store(true, Ordering::Release);
@@ -374,9 +439,32 @@ impl RemoteExplorer {
         directories: Vec<String>,
         download: bool,
     ) {
-        if self.busy() || files.is_empty() && directories.is_empty() {
+        if files.is_empty() && directories.is_empty() {
             return;
         }
+        self.transfer_queue.push_back(TransferBatch {
+            files,
+            directories,
+            download,
+            resume: None,
+        });
+        self.start_next_transfer();
+    }
+
+    fn start_next_transfer(&mut self) {
+        if self.busy() {
+            return;
+        }
+        let Some(batch) = self.transfer_queue.pop_front() else {
+            return;
+        };
+        let TransferBatch {
+            files,
+            directories,
+            download,
+            resume,
+        } = &batch;
+        let download = *download;
         let config = self.config.clone();
         let password = self.password.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -399,6 +487,16 @@ impl RemoteExplorer {
         }
         let (tx, rx) = mpsc::channel();
         self.operation = Some(rx);
+        let stats = Arc::new(Mutex::new(TransferProgress::default()));
+        let resumed_bytes = Arc::new(AtomicU64::new(0));
+        let files = files.clone();
+        let directories = directories.clone();
+        let mut resume = resume.clone();
+        self.active_transfer = Some(ActiveTransfer {
+            batch,
+            progress: stats.clone(),
+            resumed_bytes: resumed_bytes.clone(),
+        });
         self.error = None;
         std::thread::spawn(move || {
             let active = Arc::new(AtomicU64::new(1));
@@ -428,10 +526,20 @@ impl RemoteExplorer {
                                 u32::MAX - index as u32,
                                 &body,
                             )?)?;
+                            stats.lock().unwrap().directories_created += 1;
                             heartbeat.fetch_add(1, Ordering::Release);
                         }
                     }
                     for (index, (local, remote)) in files.into_iter().enumerate() {
+                        resumed_bytes.store(0, Ordering::Release);
+                        {
+                            let mut stats = stats.lock().unwrap();
+                            stats.file_start_bytes = progress.load(Ordering::Acquire);
+                            stats.file_started = Some(std::time::Instant::now());
+                            stats.file_total = (!download)
+                                .then(|| local.metadata().ok().map(|metadata| metadata.len()))
+                                .flatten();
+                        }
                         if let Ok(mut status) = file_status.lock() {
                             *status = format!(
                                 "{} / {} · {}",
@@ -440,10 +548,22 @@ impl RemoteExplorer {
                                 local.file_name().unwrap_or_default().to_string_lossy()
                             );
                         }
-                        transfer_streams(
-                            input, output, &local, &remote, download, &cancel, &progress,
+                        let result = transfer_streams_resumable(
+                            input,
+                            output,
+                            &local,
+                            &remote,
+                            download,
+                            &cancel,
+                            &progress,
                             &heartbeat,
-                        )?;
+                            Some((&mut resume, &resumed_bytes)),
+                        );
+                        let mut stats = stats.lock().unwrap();
+                        stats.resume = resume.take();
+                        result?;
+                        stats.completed += 1;
+                        stats.file_started = None;
                     }
                     Ok(())
                 },
@@ -560,6 +680,7 @@ impl RemoteExplorer {
         if let Some(result) = self.operation.as_ref().and_then(received) {
             self.operation = None;
             self.operation_cancel = None;
+            self.finish_transfer(&result);
             self.transfer_total = 0;
             if let Ok(mut status) = self.transfer_file.lock() {
                 status.clear();
@@ -618,6 +739,123 @@ impl RemoteExplorer {
             self.loading = false;
             self.result = None;
         }
+        self.start_next_transfer();
+    }
+
+    fn finish_transfer(&mut self, result: &Result<(), String>) {
+        let Some(ActiveTransfer {
+            mut batch,
+            progress,
+            ..
+        }) = self.active_transfer.take()
+        else {
+            return;
+        };
+        let stats = progress.lock().unwrap();
+        for file in batch.files.drain(..stats.completed) {
+            self.completed_transfers.push_back(Self::transfer_row(
+                &file,
+                batch.download,
+                TransferState::Done,
+            ));
+            if self.completed_transfers.len() > 200 {
+                self.completed_transfers.pop_front();
+            }
+        }
+        batch.directories.drain(..stats.directories_created);
+        if stats.file_started.is_some() {
+            batch.resume = stats.resume.clone();
+        }
+        if let Err(error) = result
+            && (!batch.files.is_empty() || !batch.directories.is_empty())
+        {
+            self.failed_transfers.push((batch, error.clone()));
+        }
+    }
+
+    fn transfer_row(file: &TransferFile, download: bool, state: TransferState) -> TransferRow {
+        TransferRow {
+            path: file.1.clone(),
+            download,
+            state,
+            bytes: 0,
+            total: None,
+            bytes_per_second: 0,
+            error: None,
+        }
+    }
+
+    pub fn transfer_rows(&self) -> Vec<TransferRow> {
+        let mut rows = Vec::new();
+        if let Some(active) = &self.active_transfer {
+            let stats = active.progress.lock().unwrap();
+            for (index, file) in active.batch.files.iter().enumerate() {
+                let state = if index < stats.completed {
+                    TransferState::Done
+                } else if index == stats.completed && stats.file_started.is_some() {
+                    TransferState::Running
+                } else {
+                    TransferState::Queued
+                };
+                let mut row = Self::transfer_row(file, active.batch.download, state);
+                if let Some(started) = stats
+                    .file_started
+                    .filter(|_| state == TransferState::Running)
+                {
+                    row.bytes = self
+                        .transferred
+                        .load(Ordering::Acquire)
+                        .saturating_sub(stats.file_start_bytes);
+                    row.total = stats.file_total;
+                    let sent = row
+                        .bytes
+                        .saturating_sub(active.resumed_bytes.load(Ordering::Acquire));
+                    row.bytes_per_second =
+                        (sent as f64 / started.elapsed().as_secs_f64().max(0.25)) as u64;
+                }
+                rows.push(row);
+            }
+        }
+        for batch in &self.transfer_queue {
+            rows.extend(
+                batch
+                    .files
+                    .iter()
+                    .map(|file| Self::transfer_row(file, batch.download, TransferState::Queued)),
+            );
+        }
+        for (batch, error) in &self.failed_transfers {
+            let directories = batch.directories.iter().filter(|_| batch.files.is_empty());
+            let paths = batch
+                .files
+                .iter()
+                .map(|file| file.1.as_str())
+                .chain(directories.map(String::as_str));
+            rows.extend(paths.map(|path| TransferRow {
+                path: path.into(),
+                download: batch.download,
+                state: TransferState::Failed,
+                bytes: 0,
+                total: None,
+                bytes_per_second: 0,
+                error: Some(error.clone()),
+            }));
+        }
+        rows.extend(self.completed_transfers.iter().rev().cloned());
+        rows
+    }
+
+    pub fn has_transfers(&self) -> bool {
+        self.active_transfer.is_some()
+            || !self.transfer_queue.is_empty()
+            || !self.failed_transfers.is_empty()
+            || !self.completed_transfers.is_empty()
+    }
+
+    pub fn retry_transfers(&mut self) {
+        self.transfer_queue
+            .extend(self.failed_transfers.drain(..).map(|(batch, _)| batch));
+        self.start_next_transfer();
     }
     pub fn operation_running(&self) -> bool {
         self.operation.is_some()
@@ -677,6 +915,7 @@ impl Drop for LocalTemporary {
     }
 }
 // Streaming files: bounded memory, exclusive destinations, progress heartbeat.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)] // Explicit streams, paths, cancellation, progress and watchdog.
 fn transfer_streams(
     input: &mut impl Write,
@@ -688,7 +927,46 @@ fn transfer_streams(
     progress: &AtomicU64,
     heartbeat: &AtomicU64,
 ) -> Result<(), String> {
-    let temporary = if download {
+    transfer_streams_resumable(
+        input, output, local, remote, download, cancel, progress, heartbeat, None,
+    )
+}
+
+fn upload_checksum(
+    file: &mut std::fs::File,
+    cancel: &AtomicBool,
+    heartbeat: &AtomicU64,
+) -> Result<[u8; 32], String> {
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Err(xpeed_i18n::t("Operation cancelled").into());
+        }
+        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+        heartbeat.fetch_add(1, Ordering::Release);
+    }
+    file.rewind().map_err(|error| error.to_string())?;
+    Ok(hash.finalize().into())
+}
+
+#[allow(clippy::too_many_arguments)] // Streams, destination, progress and optional upload staging.
+fn transfer_streams_resumable(
+    input: &mut impl Write,
+    output: &mut impl Read,
+    local: &std::path::Path,
+    remote: &str,
+    download: bool,
+    cancel: &AtomicBool,
+    progress: &AtomicU64,
+    heartbeat: &AtomicU64,
+    mut resume: Option<(&mut Option<UploadResume>, &AtomicU64)>,
+) -> Result<(), String> {
+    let mut temporary = if download {
         local
             .with_extension(format!("xpeed-{:016x}.part", rand::random::<u64>()))
             .to_string_lossy()
@@ -709,12 +987,59 @@ fn transfer_streams(
         std::fs::File::open(local)
     }
     .map_err(|e| e.to_string())?;
+    let mut offset = 0u64;
+    let mut checksum = None;
+    if !download
+        && let Some((previous, resumed)) = resume.as_ref()
+        && (previous.is_some()
+            || file.metadata().map_err(|error| error.to_string())?.len() >= 16 * 1024 * 1024)
+    {
+        let digest = upload_checksum(&mut file, cancel, heartbeat)?;
+        checksum = Some(digest);
+        if let Some(previous) = previous.as_ref() {
+            let reply = request(
+                input,
+                output,
+                7,
+                u32::MAX - 5,
+                &string(previous.temporary.as_bytes()),
+            )?;
+            let mut attrs = Cursor::new(&reply[5..]);
+            let same_size = reply[0] == 105
+                && attrs.u32()? & 1 != 0
+                && u64::from_be_bytes(attrs.bytes(8)?.try_into().unwrap()) == previous.acknowledged;
+            if previous.checksum == digest && same_size {
+                temporary.clone_from(&previous.temporary);
+                offset = previous.acknowledged;
+                file.seek(SeekFrom::Start(offset))
+                    .map_err(|error| error.to_string())?;
+                resumed.store(offset, Ordering::Release);
+            } else {
+                let _ = request(
+                    input,
+                    output,
+                    13,
+                    u32::MAX - 4,
+                    &string(previous.temporary.as_bytes()),
+                );
+            }
+        }
+    }
     let mut data = string(if download {
         remote.as_bytes()
     } else {
         temporary.as_bytes()
     });
-    data.extend_from_slice(&(if download { 1u32 } else { 42u32 }).to_be_bytes());
+    data.extend_from_slice(
+        &(if download {
+            1u32
+        } else if offset > 0 {
+            2
+        } else {
+            42
+        })
+        .to_be_bytes(),
+    );
     data.extend_from_slice(&0u32.to_be_bytes());
     let reply = request(input, output, 3, 1, &data)?;
     if reply[0] != 102 {
@@ -724,8 +1049,8 @@ fn transfer_streams(
         return Err(status_error(&reply));
     }
     let handle = Cursor::new(&reply[5..]).string()?.to_vec();
+    progress.fetch_add(offset, Ordering::Release);
     let result = (|| {
-        let mut offset = 0u64;
         let mut id = 2u32;
         let mut buffer = [0u8; 32768];
         loop {
@@ -776,14 +1101,34 @@ fn transfer_streams(
             drop(file);
             // hard_link never overwrites an existing destination, including a race.
             std::fs::hard_link(&temporary, local).map_err(|e| e.to_string())?;
-            std::fs::remove_file(&temporary).map_err(|e| e.to_string())
+            Ok(())
         } else {
+            if let Some(expected) = checksum {
+                file.rewind().map_err(|error| error.to_string())?;
+                if upload_checksum(&mut file, cancel, heartbeat)? != expected {
+                    checksum = None;
+                    return Err(xpeed_i18n::t("Upload source changed during transfer").into());
+                }
+            }
             let mut data = string(temporary.as_bytes());
             data.extend(string(remote.as_bytes()));
             expect_ok(&request(input, output, 18, u32::MAX - 1, &data)?)
         }
     });
-    if result.is_err() {
+    let preserve =
+        result.is_err() && offset > 0 && !cancel.load(Ordering::Acquire) && checksum.is_some();
+    if let Some((slot, _)) = resume.take() {
+        *slot = if preserve {
+            checksum.map(|checksum| UploadResume {
+                temporary: temporary.clone(),
+                checksum,
+                acknowledged: offset,
+            })
+        } else {
+            None
+        };
+    }
+    if result.is_err() && !preserve {
         if download {
             let _ = std::fs::remove_file(&temporary);
         } else {
@@ -835,12 +1180,35 @@ pub fn tool_replace(
     replacement: &str,
     hosts: Option<&std::path::Path>,
 ) -> Result<(), String> {
+    match replace_text(config, password, cancel, path, expected, replacement, hosts)? {
+        ReplaceOutcome::Written => Ok(()),
+        ReplaceOutcome::Conflict(_) => {
+            Err("File changed since the proposal; read it again.".into())
+        }
+    }
+}
+
+pub(crate) enum ReplaceOutcome {
+    Written,
+    Conflict(String),
+}
+
+pub(crate) fn replace_text(
+    config: &SshConfig,
+    password: Option<crate::credentials::Secret>,
+    cancel: Arc<AtomicBool>,
+    path: &str,
+    expected: &str,
+    replacement: &str,
+    hosts: Option<&std::path::Path>,
+) -> Result<ReplaceOutcome, String> {
     transport(config, cancel.clone(), password, hosts, |input, output| {
         init_streams(input, output)?;
         let canonical = tool_canonical(input, output, path)?;
         let path = canonical.as_str();
-        if read_text_streams(input, output, path)? != expected {
-            return Err("File changed since the proposal; read it again.".into());
+        let current = read_text_streams(input, output, path)?;
+        if current != expected {
+            return Ok(ReplaceOutcome::Conflict(current));
         }
         // Write exclusively to a sibling and atomically rename with OpenSSH's
         // extension. Unsupported servers fail before touching the original.
@@ -882,15 +1250,17 @@ pub fn tool_replace(
             if cancel.load(std::sync::atomic::Ordering::Acquire) {
                 return Err("Cancelled before applying the change.".into());
             }
-            if read_text_streams(input, output, path)? != expected {
-                return Err("File changed since the proposal; read it again.".into());
+            let current = read_text_streams(input, output, path)?;
+            if current != expected {
+                return Ok(ReplaceOutcome::Conflict(current));
             }
             let mut data = string(b"posix-rename@openssh.com");
             data.extend(string(temporary.as_bytes()));
             data.extend(string(path.as_bytes()));
-            expect_ok(&request(input, output, 200, 10000, &data)?)
+            expect_ok(&request(input, output, 200, 10000, &data)?)?;
+            Ok(ReplaceOutcome::Written)
         });
-        if result.is_err() {
+        if !matches!(result, Ok(ReplaceOutcome::Written)) {
             let _ = request(input, output, 13, 10001, &string(temporary.as_bytes()));
         }
         result
@@ -1391,6 +1761,39 @@ fn parse_names(data: &[u8]) -> Result<Vec<Entry>, String> {
 mod tests {
     use super::*;
     #[test]
+    fn retry_keeps_completed_files_and_folders_out_of_the_new_batch() {
+        let mut explorer = RemoteExplorer::preview();
+        explorer.loading = true;
+        explorer.active_transfer = Some(ActiveTransfer {
+            batch: TransferBatch {
+                files: vec![
+                    ("one".into(), "/folder/one".into()),
+                    ("two".into(), "/folder/two".into()),
+                ],
+                directories: vec!["/folder".into()],
+                download: false,
+                resume: None,
+            },
+            progress: Arc::new(Mutex::new(TransferProgress {
+                completed: 1,
+                directories_created: 1,
+                ..Default::default()
+            })),
+            resumed_bytes: Arc::new(AtomicU64::new(0)),
+        });
+        explorer.finish_transfer(&Err("interrupted".into()));
+        let rows = explorer.transfer_rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].path, "/folder/two");
+        assert!(rows[0].state == TransferState::Failed);
+        assert_eq!(rows[1].path, "/folder/one");
+        assert!(rows[1].state == TransferState::Done);
+        explorer.retry_transfers();
+        let retry = explorer.transfer_queue.pop_front().unwrap();
+        assert!(retry.directories.is_empty());
+        assert_eq!(retry.files, [("two".into(), "/folder/two".into())]);
+    }
+    #[test]
     #[ignore = "Isolated localhost fixture started by scripts/test-session-tools.py"]
     fn interactive_sftp_transfers_and_editor_conflicts() {
         let data: serde_json::Value = serde_json::from_slice(
@@ -1474,8 +1877,8 @@ mod tests {
             Some(&hosts),
         )
         .unwrap();
-        assert!(
-            tool_replace(
+        assert!(matches!(
+            replace_text(
                 &config,
                 None,
                 Arc::new(AtomicBool::new(false)),
@@ -1483,9 +1886,9 @@ mod tests {
                 "",
                 "stale\n",
                 Some(&hosts)
-            )
-            .is_err()
-        );
+            ).unwrap(),
+            ReplaceOutcome::Conflict(current) if current == "first\n"
+        ));
         assert_eq!(
             tool_read(
                 &config,
@@ -1497,6 +1900,19 @@ mod tests {
             .unwrap(),
             "first\n"
         );
+        assert!(matches!(
+            replace_text(
+                &config,
+                None,
+                Arc::new(AtomicBool::new(false)),
+                editor_path,
+                "first\n",
+                "reviewed\n",
+                Some(&hosts),
+            )
+            .unwrap(),
+            ReplaceOutcome::Written
+        ));
         let channel = transport_mode(
             &config,
             Arc::new(AtomicBool::new(false)),
@@ -1713,6 +2129,60 @@ mod tests {
             .is_err()
         );
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn large_upload_resumes_at_the_acknowledged_offset() {
+        let path = std::env::temp_dir().join(format!("xpeed-resume-{}", rand::random::<u64>()));
+        let _cleanup = LocalTemporary(Some(path.clone()));
+        let size = 16 * 1024 * 1024;
+        let acknowledged: u64 = size - 4;
+        std::fs::File::create(&path).unwrap().set_len(size).unwrap();
+        let cancel = AtomicBool::new(false);
+        let heartbeat = AtomicU64::new(0);
+        let progress = AtomicU64::new(0);
+        let mut resume = Some(UploadResume {
+            temporary: "/remote-file.xpeed-fixture.part".into(),
+            checksum: upload_checksum(
+                &mut std::fs::File::open(&path).unwrap(),
+                &cancel,
+                &heartbeat,
+            )
+            .unwrap(),
+            acknowledged,
+        });
+        let mut wire = Vec::new();
+        let mut attrs = vec![105];
+        attrs.extend((u32::MAX - 5).to_be_bytes());
+        attrs.extend(1u32.to_be_bytes());
+        attrs.extend(acknowledged.to_be_bytes());
+        write_packet(&mut wire, &attrs).unwrap();
+        let mut handle = vec![102];
+        handle.extend(1u32.to_be_bytes());
+        handle.extend(string(b"handle"));
+        write_packet(&mut wire, &handle).unwrap();
+        status(&mut wire, 2, 0, "written");
+        status(&mut wire, u32::MAX - 2, 0, "closed");
+        status(&mut wire, u32::MAX - 1, 0, "renamed");
+        let mut sent = Vec::new();
+        transfer_streams_resumable(
+            &mut sent,
+            &mut wire.as_slice(),
+            &path,
+            "/remote-file",
+            false,
+            &cancel,
+            &progress,
+            &heartbeat,
+            Some((&mut resume, &AtomicU64::new(0))),
+        )
+        .unwrap();
+        assert!(
+            sent.windows(8)
+                .any(|bytes| bytes == acknowledged.to_be_bytes())
+        );
+        assert_eq!(progress.load(Ordering::Acquire), size);
+        assert!(resume.is_none());
     }
     #[test]
     fn terminal_directory_changes_and_listing_results_keep_grid_mode() {

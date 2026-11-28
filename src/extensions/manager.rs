@@ -106,9 +106,21 @@ fn row(
                 icon(ui, id, 42.0, image);
                 ui.vertical(|ui| {
                     ui.set_max_width((width - 72.0).max(32.0));
-                    ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
-                    ui.add(egui::Label::new(RichText::new(description).weak()).truncate());
-                    ui.add(egui::Label::new(RichText::new(publisher).small()).truncate());
+                    ui.add(
+                        egui::Label::new(RichText::new(name).strong())
+                            .truncate()
+                            .selectable(false),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(description).weak())
+                            .truncate()
+                            .selectable(false),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(publisher).small())
+                            .truncate()
+                            .selectable(false),
+                    );
                 });
             });
         })
@@ -150,6 +162,7 @@ impl Extensions {
     }
 
     pub fn manager_ui(&mut self, ui: &mut egui::Ui) {
+        ui.style_mut().interaction.selectable_labels = true;
         ui.horizontal(|ui| {
             ui.heading(xpeed_i18n::t("Extensiones"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -269,6 +282,7 @@ impl Extensions {
             ui.weak(catalog.len().to_string());
         });
         egui::ScrollArea::vertical()
+            .scroll_source(super::panel_menu::TEXT_SCROLL)
             .id_salt("catalog_extensions")
             .show(ui, |ui| {
                 if catalog.is_empty() {
@@ -294,6 +308,7 @@ impl Extensions {
     }
 
     pub fn details_ui(&mut self, ui: &mut egui::Ui, detail: u64) {
+        ui.style_mut().interaction.selectable_labels = true;
         let catalog = self
             .catalog
             .iter()
@@ -336,6 +351,7 @@ impl Extensions {
         let mut rollback = None;
         let previous = self.previous_versions(&m.id);
         egui::ScrollArea::vertical()
+            .scroll_source(super::panel_menu::TEXT_SCROLL)
             .id_salt(("extension_details", detail))
             .show(ui, |ui| {
                 egui::Frame::new().inner_margin(24).show(ui, |ui| {

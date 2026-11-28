@@ -117,6 +117,7 @@ pub struct Session {
     event_tx: Arc<Mutex<Sender<Event>>>,
     failures: Receiver<String>,
     pub error: Option<String>,
+    pub disconnect_reason: Option<String>,
     pub exited: bool,
     pub unexpected_disconnect: bool,
     pub reconnecting: bool,
@@ -192,6 +193,7 @@ impl Session {
             event_tx,
             failures,
             error: None,
+            disconnect_reason: None,
             exited: false,
             unexpected_disconnect: false,
             reconnecting: false,
@@ -477,6 +479,7 @@ impl Session {
             event_tx,
             failures,
             error: None,
+            disconnect_reason: previous.and_then(|session| session.disconnect_reason.clone()),
             exited: false,
             unexpected_disconnect: false,
             reconnecting: false,
@@ -524,10 +527,15 @@ impl Session {
     }
 
     pub(crate) fn at_password_prompt(&self) -> bool {
+        self.ssh_prompt()
+            .is_some_and(|text| crate::credentials::password_prompt(&text))
+    }
+
+    fn ssh_prompt(&self) -> Option<String> {
         if self.remote.is_none() || self.auth_complete || self.exited {
-            return false;
+            return None;
         }
-        self.term.lock().ok().is_some_and(|term| {
+        self.term.lock().ok().map(|term| {
             let row = term.grid().cursor.point.line;
             let text: String = (0..self.size.cols)
                 .map(|col| {
@@ -538,8 +546,25 @@ impl Session {
                     .c
                 })
                 .collect();
-            crate::credentials::password_prompt(&text)
+            text
         })
+    }
+
+    pub(crate) fn awaiting_ssh_input(&self) -> bool {
+        self.ssh_prompt().is_some_and(|text| {
+            let text = text.trim().to_ascii_lowercase();
+            crate::credentials::password_prompt(&text)
+                || text.contains("passphrase") && text.ends_with(':')
+                || text.ends_with("(yes/no/[fingerprint])?")
+                || text.ends_with("(yes/no)?")
+        })
+    }
+
+    pub(crate) fn stop_retry(&mut self) -> Result<(), String> {
+        if let Some(child) = &mut self.child {
+            child.kill().map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
     pub fn send_user(&mut self, bytes: Vec<u8>) {
         if self.console.busy() {
@@ -627,6 +652,13 @@ impl Session {
                 }
             });
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capture_input(&mut self) -> Receiver<Vec<u8>> {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        self.input = Some(sender);
+        receiver
     }
 
     pub fn paste(&mut self, text: &str) {
@@ -719,10 +751,18 @@ impl Session {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     if self.remote.is_some() && !status.success() {
-                        self.error = Some(xpeed_i18n::format(
+                        let details = xpeed_i18n::format(
                             "OpenSSH terminó con código {}. Revisa el último mensaje de la terminal para conocer el motivo.",
                             &[("0", format!("{}", status.exit_code()))],
-                        ));
+                        );
+                        let diagnostic = self.diagnostic_output.lock().ok().and_then(|output| {
+                            ssh_failure_reason(&String::from_utf8_lossy(&output))
+                        });
+                        self.disconnect_reason = diagnostic
+                            .map(|reason| format!("{} · {details}", xpeed_i18n::t(reason)))
+                            .or_else(|| self.disconnect_reason.take())
+                            .or_else(|| Some(details.clone()));
+                        self.error = Some(details);
                     }
                     self.unexpected_disconnect =
                         self.remote.is_some() && status.exit_code() == 255 && self.auth_complete;
@@ -765,25 +805,16 @@ impl Session {
     }
 
     pub fn find_text(&mut self, query: &str, previous: bool) -> (usize, usize) {
-        use alacritty_terminal::index::{Column, Line, Point};
         let Ok(mut term) = self.term.lock() else {
             return (0, 0);
         };
         if query.is_empty() {
             return (0, 0);
         }
-        let history = term.grid().history_size() as i32;
         let offset = term.grid().display_offset() as i32;
-        let mut lines = Vec::new();
-        let needle = query.to_lowercase();
-        for line in -history..self.size.rows as i32 {
-            let text: String = (0..self.size.cols)
-                .map(|col| term.grid()[Point::new(Line(line), Column(col))].c)
-                .collect();
-            if text.to_lowercase().contains(&needle) {
-                lines.push(line);
-            }
-        }
+        let lines: Vec<_> = matching_lines(&term, self.size, query, false)
+            .map(|hit| hit.line)
+            .collect();
         let anchor = self
             .search_position
             .as_ref()
@@ -811,6 +842,31 @@ impl Session {
             lines.len(),
         )
     }
+
+    pub(crate) fn search_matches(&self, query: &str, limit: usize) -> Vec<SearchMatch> {
+        let Ok(term) = self.term.lock() else {
+            return Vec::new();
+        };
+        matching_lines(&term, self.size, query, true)
+            .take(limit)
+            .collect()
+    }
+
+    pub(crate) fn reveal_match(&mut self, query: &str, hit: &SearchMatch) -> bool {
+        let Ok(mut term) = self.term.lock() else {
+            return false;
+        };
+        let Some(current) = matching_lines(&term, self.size, query, false)
+            .filter(|candidate| candidate.text == hit.text)
+            .min_by_key(|candidate| candidate.line.abs_diff(hit.line))
+        else {
+            return false;
+        };
+        let offset = term.grid().display_offset() as i32;
+        term.scroll_display(Scroll::Delta((-current.line).max(0) - offset));
+        self.search_position = Some((query.into(), current.line));
+        true
+    }
     pub fn scroll(&mut self, lines: i32) {
         if let Ok(mut term) = self.term.lock() {
             term.scroll_display(Scroll::Delta(lines));
@@ -822,6 +878,71 @@ impl Session {
             term.scroll_display(Scroll::Bottom);
         }
     }
+}
+
+fn ssh_failure_reason(output: &str) -> Option<&'static str> {
+    output.lines().rev().find_map(|line| {
+        let line = line.to_ascii_lowercase();
+        [
+            (
+                "host key verification failed",
+                "SSH host identity could not be verified.",
+            ),
+            (
+                "remote host identification has changed",
+                "SSH host identity could not be verified.",
+            ),
+            ("permission denied (", "SSH authentication was rejected."),
+            (
+                "could not resolve hostname",
+                "SSH could not resolve the host name.",
+            ),
+            (
+                "connection refused",
+                "The server refused the SSH connection.",
+            ),
+            ("connection timed out", "The SSH connection timed out."),
+            ("operation timed out", "The SSH connection timed out."),
+            ("no route to host", "The SSH host is unreachable."),
+            ("network is unreachable", "The SSH host is unreachable."),
+            ("broken pipe", "The SSH connection was interrupted."),
+            ("connection reset", "The SSH connection was interrupted."),
+        ]
+        .into_iter()
+        .find_map(|(message, reason)| line.contains(message).then_some(reason))
+    })
+}
+
+pub(crate) struct SearchMatch {
+    pub line: i32,
+    pub text: String,
+}
+
+fn matching_lines(
+    term: &Term<Proxy>,
+    size: Size,
+    query: &str,
+    newest_first: bool,
+) -> impl Iterator<Item = SearchMatch> {
+    use alacritty_terminal::index::{Column, Line, Point};
+    let history = term.grid().history_size() as i32;
+    let rows = size.rows as i32;
+    let needle = query.to_lowercase();
+    (0..(history + rows)).filter_map(move |index| {
+        let line = if newest_first {
+            rows - index - 1
+        } else {
+            index - history
+        };
+        let text: String = (0..size.cols)
+            .map(|col| term.grid()[Point::new(Line(line), Column(col))].c)
+            .collect();
+        let text = text.trim_end();
+        (!needle.is_empty() && text.to_lowercase().contains(&needle)).then(|| SearchMatch {
+            line,
+            text: text.to_owned(),
+        })
+    })
 }
 
 fn detect_host_key_change(
@@ -1018,6 +1139,26 @@ pub fn smoke_test() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_diagnostics_distinguish_host_validation_authentication_and_transport() {
+        assert_eq!(
+            ssh_failure_reason("Host key verification failed.\r\n"),
+            Some("SSH host identity could not be verified.")
+        );
+        assert_eq!(
+            ssh_failure_reason("root@example: Permission denied (publickey).\r\n"),
+            Some("SSH authentication was rejected.")
+        );
+        assert_eq!(
+            ssh_failure_reason("ssh: connect to host example port 22: Connection refused\r\n"),
+            Some("The server refused the SSH connection.")
+        );
+        assert_eq!(
+            ssh_failure_reason("read /home/file: Permission denied"),
+            None
+        );
+    }
     use std::net::TcpListener;
 
     #[test]

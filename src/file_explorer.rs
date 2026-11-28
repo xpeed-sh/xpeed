@@ -682,6 +682,14 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
                 });
             });
         });
+        if remote.has_transfers() {
+            egui::CollapsingHeader::new(xpeed_i18n::t("File transfers")).show(ui, |ui| {
+                if ui.button(xpeed_i18n::t("Upload files…")).clicked() {
+                    browser.upload = Some((Default::default(), remote.path.clone()));
+                }
+                show_transfers(ui, remote);
+            });
+        }
         if let Some(error) = &remote.error {
             ui.add(egui::Label::new(RichText::new(error).small()).wrap());
         }
@@ -965,7 +973,10 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
         browser.upload = None;
     }
     let dropped = ui.ctx().input(|i| i.raw.dropped_files.clone());
-    if ui.rect_contains_pointer(ui.max_rect()) && !busy && !dropped.is_empty() {
+    if ui.rect_contains_pointer(ui.max_rect())
+        && (!busy || remote.authenticated || remote.operation_running())
+        && !dropped.is_empty()
+    {
         let mut files = Vec::new();
         for file in dropped {
             if let Some(path) = file.path
@@ -1024,6 +1035,44 @@ pub fn show(ui: &mut egui::Ui, remote: &mut RemoteExplorer, name: &str, id: u64,
             }
         }
     }
+}
+
+fn show_transfers(ui: &mut egui::Ui, remote: &mut RemoteExplorer) {
+    use crate::sftp::TransferState;
+    let t = xpeed_i18n::t;
+    let rows = remote.transfer_rows();
+    if rows.iter().any(|row| row.state == TransferState::Failed)
+        && ui.button(t("Retry unfinished transfers")).clicked()
+    {
+        remote.retry_transfers();
+    }
+    egui::ScrollArea::vertical()
+        .id_salt("transfer_queue")
+        .max_height(150.0)
+        .show_rows(ui, 36.0, rows.len(), |ui, range| {
+            for row in &rows[range] {
+                let direction = if row.download { "↓" } else { "↑" };
+                ui.add(egui::Label::new(format!("{direction} {}", row.path)).truncate())
+                    .on_hover_text(&row.path);
+                let status = match row.state {
+                    TransferState::Queued => t("Queued"),
+                    TransferState::Done => t("Transfer complete"),
+                    TransferState::Failed => t("Transfer unfinished"),
+                    TransferState::Running => "",
+                };
+                let detail = if row.state == TransferState::Running {
+                    let progress = row.total.map_or_else(
+                        || size(row.bytes),
+                        |total| format!("{} / {}", size(row.bytes), size(total)),
+                    );
+                    format!("{progress} · {}/s", size(row.bytes_per_second))
+                } else {
+                    status.to_owned()
+                };
+                ui.add(egui::Label::new(RichText::new(detail).small()).truncate())
+                    .on_hover_text(row.error.as_deref().unwrap_or(""));
+            }
+        });
 }
 
 #[cfg(test)]

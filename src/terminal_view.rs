@@ -22,6 +22,13 @@ pub fn terminal_view(
     let accent = palette.accent;
     let available = ui.available_size();
     let (rect, response) = ui.allocate_exact_size(available, Sense::click_and_drag());
+    let first_render = session.input_id.is_none();
+    let outside_press = ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(event, Event::PointerButton { pos, pressed: true, .. }
+                if !response.rect.intersect(ui.clip_rect()).contains(*pos))
+        })
+    });
     if session
         .input_id
         .is_some_and(|id| id != response.id && ui.ctx().memory(|m| m.focused() == Some(id)))
@@ -32,18 +39,15 @@ pub fn terminal_view(
     if response.clicked() || response.drag_started() {
         response.request_focus();
     }
-    if response.has_focus()
-        && ui.input(|input| {
-            input.pointer.any_pressed()
-                && input
-                    .pointer
-                    .interact_pos()
-                    .is_some_and(|position| !response.rect.contains(position))
-        })
-    {
+    if outside_press && response.has_focus() {
         response.surrender_focus();
     }
-    if focused && keyboard && ui.ctx().memory(|m| m.focused().is_none()) {
+    if first_render
+        && !outside_press
+        && focused
+        && keyboard
+        && ui.ctx().memory(|m| m.focused().is_none())
+    {
         response.request_focus();
     }
     ui.memory_mut(|memory| {
@@ -87,46 +91,48 @@ pub fn terminal_view(
         let Ok(mut term) = session.term.lock() else {
             return false;
         };
-        let offset = term.grid().display_offset();
-        display_offset = offset;
-        let point_at = |pos: Pos2| {
-            Point::new(
-                Line(
-                    ((pos.y - rect.top()) / cell_height)
-                        .floor()
-                        .clamp(0.0, rows as f32 - 1.0) as i32
-                        - offset as i32,
+        let point_at = |pos: Pos2, offset: usize| {
+            let x = ((pos.x - rect.left()) / cell_width).clamp(0.0, cols as f32);
+            let column = (x.floor() as usize).min(cols - 1);
+            let side = if x - (column as f32) < 0.5 {
+                Side::Left
+            } else {
+                Side::Right
+            };
+            (
+                Point::new(
+                    Line(
+                        ((pos.y - rect.top()) / cell_height)
+                            .floor()
+                            .clamp(0.0, rows as f32 - 1.0) as i32
+                            - offset as i32,
+                    ),
+                    Column(column),
                 ),
-                Column(
-                    ((pos.x - rect.left()) / cell_width)
-                        .floor()
-                        .clamp(0.0, cols as f32 - 1.0) as usize,
-                ),
+                side,
             )
         };
-        if (response.drag_started() || response.double_clicked())
-            && let Some(pos) = response.interact_pointer_pos()
+        let dragging = response.dragged_by(egui::PointerButton::Primary);
+        let (origin, pointer, time) = ui.input(|input| {
+            (
+                input.pointer.press_origin(),
+                input.pointer.latest_pos(),
+                input.time,
+            )
+        });
+        if (response.drag_started_by(egui::PointerButton::Primary) || response.double_clicked())
+            && let Some(pos) = origin.or(response.interact_pointer_pos())
         {
+            let (point, side) = point_at(pos, term.grid().display_offset());
             term.selection = Some(Selection::new(
                 if response.double_clicked() {
                     SelectionType::Semantic
                 } else {
                     SelectionType::Simple
                 },
-                point_at(pos),
-                Side::Left,
+                point,
+                side,
             ));
-        }
-        if response.dragged()
-            && let Some(pos) = response.interact_pointer_pos()
-            && let Some(selection) = &mut term.selection
-        {
-            selection.update(point_at(pos), Side::Right);
-            let edge_scroll = selection_drag_scroll(pos.y, rect, cell_height);
-            if edge_scroll != 0 {
-                scroll += edge_scroll;
-                ui.ctx().request_repaint();
-            }
         }
         if response.clicked() && !response.double_clicked() {
             term.selection = None;
@@ -136,24 +142,62 @@ pub fn terminal_view(
             scroll = (session.scroll_remainder / cell_height).trunc() as i32;
             session.scroll_remainder -= scroll as f32 * cell_height;
         }
+        if dragging && let Some(pos) = pointer {
+            let edge_scroll = selection_drag_scroll(pos.y, rect, cell_height);
+            let tick_id = response.id.with("selection_scroll_tick");
+            if edge_scroll != 0 {
+                let elapsed = ui.data_mut(|data| {
+                    let previous = data.get_temp::<f64>(tick_id);
+                    if previous.is_none_or(|last| time - last >= 0.033) {
+                        data.insert_temp(tick_id, time);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if elapsed {
+                    scroll += edge_scroll;
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(34));
+            }
+            if scroll != 0 {
+                term.scroll_display(alacritty_terminal::grid::Scroll::Delta(scroll));
+                scroll = 0;
+            }
+            let (point, side) = point_at(pos, term.grid().display_offset());
+            if let Some(selection) = &mut term.selection {
+                selection.update(point, side);
+            }
+        }
+        let offset = term.grid().display_offset();
+        display_offset = offset;
         let mode = *term.mode();
-        let accepts_keyboard = focused && keyboard && response.has_focus();
+        let accepts_keyboard = focused && keyboard && !outside_press && response.has_focus();
         if accepts_keyboard && session.record_commands && !mode.contains(TermMode::ALT_SCREEN) {
             editor = command_editor(&term, cols);
         }
         if accepts_keyboard {
             let events = ui.input(|i| i.events.clone());
             let modifiers = ui.input(|i| i.modifiers);
+            let copying_panel_text = ui
+                .ctx()
+                .plugin::<egui::text_selection::LabelSelectionState>()
+                .lock()
+                .has_selection();
             for event in events {
                 match event {
-                    Event::Copy
-                        if modifiers.shift
-                            || modifiers.mac_cmd
-                            || modifiers.ctrl && modifiers.alt =>
-                    {
-                        copy = term.selection_to_string()
+                    Event::Copy if !copying_panel_text => {
+                        copy = term.selection_to_string();
+                        if copy.is_none()
+                            && modifiers.ctrl
+                            && !modifiers.shift
+                            && !modifiers.alt
+                            && !modifiers.mac_cmd
+                        {
+                            outgoing.push(vec![3]);
+                        }
                     }
-                    Event::Copy => outgoing.push(vec![3]),
                     Event::Cut => outgoing.push(vec![24]),
                     Event::Paste(text) => {
                         let text = text.replace('\u{1b}', "");
@@ -178,7 +222,9 @@ pub fn terminal_view(
                         modifiers,
                         ..
                     } => {
-                        if modifiers.ctrl && modifiers.shift && key == egui::Key::C {
+                        if copying_panel_text && key == egui::Key::C && modifiers.command {
+                            continue;
+                        } else if modifiers.ctrl && modifiers.shift && key == egui::Key::C {
                             copy = term.selection_to_string();
                         } else if modifiers.shift && key == egui::Key::PageUp {
                             scroll = rows as i32 - 1;
@@ -491,5 +537,104 @@ mod tests {
         assert!(selection_drag_scroll(210.0, rect, 20.0) < 0);
         assert_eq!(selection_drag_scroll(-500.0, rect, 20.0), 6);
         assert_eq!(selection_drag_scroll(500.0, rect, 20.0), -6);
+    }
+
+    #[test]
+    fn stationary_drag_scrolls_inside_terminal_without_wheel_events() {
+        let ctx = egui::Context::default();
+        let mut session = Session::screenshot_preview(Default::default()).unwrap();
+        for row in 0..100 {
+            session.append_notice(&format!("History row {row}"));
+        }
+        let frame = |session: &mut Session, time, events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 300.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        terminal_view(ui, session, 14.0, Palette::default(), false, false, "");
+                    });
+                },
+            );
+        };
+        let start = Pos2::new(100.0, 135.0);
+        let edge = Pos2::new(100.0, 26.0);
+        frame(&mut session, 0.0, vec![]);
+        frame(
+            &mut session,
+            0.05,
+            vec![
+                Event::PointerMoved(start),
+                Event::PointerButton {
+                    pos: start,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frame(&mut session, 0.10, vec![Event::PointerMoved(edge)]);
+        let offset = session.term.lock().unwrap().grid().display_offset();
+        frame(&mut session, 0.15, vec![]);
+        let term = session.term.lock().unwrap();
+        assert!(term.grid().display_offset() > offset);
+        assert!(
+            term.selection_to_string()
+                .is_some_and(|text| text.lines().count() > 1)
+        );
+    }
+
+    #[test]
+    fn panel_copy_does_not_write_an_interrupt_to_the_focused_terminal() {
+        let ctx = egui::Context::default();
+        let mut session = Session::screenshot_preview(Default::default()).unwrap();
+        let input = session.capture_input();
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let frame = |session: &mut Session, events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 300.0))),
+                    modifiers,
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.add(egui::Label::new("Text in another panel").selectable(true));
+                        ui.add_space(30.0);
+                        terminal_view(ui, session, 14.0, Palette::default(), true, true, "");
+                    });
+                },
+            );
+        };
+        frame(&mut session, vec![]);
+        frame(&mut session, vec![Event::Copy]);
+        assert_eq!(input.try_recv().unwrap(), vec![3]);
+
+        let pos = Pos2::new(24.0, 15.0);
+        frame(
+            &mut session,
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers,
+                },
+                Event::Copy,
+            ],
+        );
+        frame(&mut session, vec![Event::Copy]);
+        assert!(input.try_recv().is_err());
+        assert_ne!(ctx.memory(|m| m.focused()), session.input_id);
     }
 }

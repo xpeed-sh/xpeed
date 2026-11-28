@@ -1,13 +1,13 @@
 use crate::{
     assistant::Assistant,
     connections::{Connection, ConnectionStore, SshConfig, Target},
-    history::History,
+    history::{Favorite, History},
     palette::{Density, Mode, Palette},
     settings::Settings,
     sftp::RemoteExplorer,
     terminal::{HostKeyChange, Profile, Session},
     terminal_view::terminal_view,
-    workspace::{self, Pane, Snapshot},
+    workspace::{self, Pane, SavedWorkspace, Snapshot},
 };
 use eframe::egui::{self, Align, Align2, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use egui_tiles::{
@@ -21,6 +21,12 @@ use std::{
 };
 
 const PANEL_GAP: i8 = 5;
+
+struct FavoriteEditor {
+    index: Option<usize>,
+    item: Favorite,
+    scope: Option<Target>,
+}
 
 fn recent_connection_columns(available_width: f32) -> usize {
     if available_width >= 620.0 {
@@ -58,11 +64,16 @@ enum Action {
     ForgetAccess(usize),
     Draft(&'static str),
     Search,
+    SearchAll,
+    Workspaces,
+    OpenWorkspace(String),
     ToggleAI,
     OpenExtension(String),
     Home,
     ClearCommands,
     InsertCommand(u64, String),
+    NewFavorite(Option<Target>, String),
+    EditFavorite(usize),
     Backup,
 }
 
@@ -145,10 +156,12 @@ pub struct Xpeed {
     last_right_panel: Pane,
     sessions: BTreeMap<u64, Session>,
     reconnects: BTreeMap<u64, (u32, Instant)>,
+    manual_reconnects: BTreeSet<u64>,
     productivity: crate::productivity::State,
     updates: crate::updates::Updates,
     sources: BTreeMap<u64, Connection>,
     focused: Option<u64>,
+    focus_terminal_after_layout: Option<u64>,
     next_id: u64,
     settings: Settings,
     connections: ConnectionStore,
@@ -164,13 +177,23 @@ pub struct Xpeed {
     monitor_interest: bool,
     monitor_generation: u64,
     monitor_retry: Instant,
+    monitor_sampled: bool,
+    monitor_error: Option<String>,
     history: History,
+    favorite_editor: Option<FavoriteEditor>,
+    saved_workspaces: workspace::SavedWorkspaces,
+    workspace_manager: bool,
+    workspace_name: String,
     files_focus: Option<u64>,
     activity: Vec<String>,
     query: String,
     search: String,
     show_search: bool,
     search_result: (usize, usize),
+    search_all: bool,
+    search_matches: Vec<(u64, crate::terminal::SearchMatch)>,
+    search_submitted: bool,
+    search_truncated: bool,
     sidebar_view: SidebarView,
     sidebar_tree: Tree<Pane>,
     show_palette: bool,
@@ -183,6 +206,7 @@ pub struct Xpeed {
     capture_requested: bool,
     created: Instant,
     frame_cost_ms: f32,
+    frame_samples: std::collections::VecDeque<f32>,
     layout_dirty: bool,
     edited_at: Instant,
     ephemeral: bool,
@@ -243,6 +267,8 @@ impl Xpeed {
             self.monitor_target = target.clone();
             self.monitor_interest = interested;
             self.monitor_retry = Instant::now();
+            self.monitor_sampled = false;
+            self.monitor_error = None;
         }
         let context = if let Some((id, config)) = &target {
             serde_json::json!({"id":self.monitor_generation,"sessionId":id,"name":self.sources.get(id).map(|source| &source.name),"host":config.host,"port":config.port,"user":config.user,"observing":interested})
@@ -269,9 +295,13 @@ impl Xpeed {
                 .as_ref()
                 .and_then(crate::server_monitor::Worker::poll)
             {
-                if result.is_err() {
+                if let Err(error) = &result {
                     self.monitor = None;
                     self.monitor_retry = Instant::now() + Duration::from_secs(10);
+                    self.monitor_error = Some(error.clone());
+                } else {
+                    self.monitor_sampled = true;
+                    self.monitor_error = None;
                 }
                 self.extensions
                     .server_sample(self.monitor_generation, result);
@@ -423,10 +453,12 @@ impl Xpeed {
             last_right_panel: Pane::AppInfo,
             sessions: BTreeMap::new(),
             reconnects: BTreeMap::new(),
+            manual_reconnects: BTreeSet::new(),
             productivity: Default::default(),
             updates: Default::default(),
             sources: BTreeMap::new(),
             focused: None,
+            focus_terminal_after_layout: None,
             next_id: 1,
             settings,
             connections: if ephemeral {
@@ -446,17 +478,31 @@ impl Xpeed {
             monitor_interest: false,
             monitor_generation: 0,
             monitor_retry: Instant::now(),
+            monitor_sampled: false,
+            monitor_error: None,
             history: if ephemeral {
                 History::default()
             } else {
                 History::load()
             },
+            favorite_editor: None,
+            saved_workspaces: if ephemeral {
+                BTreeMap::new()
+            } else {
+                workspace::load_saved()
+            },
+            workspace_manager: false,
+            workspace_name: String::new(),
             files_focus: None,
             activity: Vec::new(),
             query: String::new(),
             search: String::new(),
             show_search: false,
             search_result: (0, 0),
+            search_all: false,
+            search_matches: Vec::new(),
+            search_submitted: false,
+            search_truncated: false,
             sidebar_view: if args.iter().any(|a| a == "--show-settings") {
                 SidebarView::Settings
             } else {
@@ -476,6 +522,7 @@ impl Xpeed {
             capture_requested: false,
             created: Instant::now(),
             frame_cost_ms: 0.0,
+            frame_samples: std::collections::VecDeque::with_capacity(120),
             layout_dirty: false,
             edited_at: Instant::now(),
             ephemeral,
@@ -789,8 +836,13 @@ impl Xpeed {
         }
         self.sessions.insert(id, session);
         if let Target::Ssh(config) = &connection.target {
-            self.remote_files
-                .insert(id, RemoteExplorer::new(config.clone()));
+            match self.remote_files.get_mut(&id) {
+                Some(remote) if remote.connection() == *config => remote.refresh_after_reconnect(),
+                _ => {
+                    self.remote_files
+                        .insert(id, RemoteExplorer::new(config.clone()));
+                }
+            }
         }
         self.apply_preferences();
         self.files_focus = None;
@@ -861,6 +913,7 @@ impl Xpeed {
     fn close(&mut self, id: u64) {
         self.flush_commands();
         self.reconnects.remove(&id);
+        self.manual_reconnects.remove(&id);
         if let Some(tile) = workspace::find(&self.tree, Pane::Terminal(id)) {
             if self.sources.len() == 1 && workspace::find(&self.tree, Pane::Welcome).is_none() {
                 self.tree.tiles.insert(tile, Tile::Pane(Pane::Welcome));
@@ -1107,7 +1160,292 @@ impl Xpeed {
         }
         self.layout_dirty = false;
     }
+    fn open_workspace(&mut self, name: &str, ctx: &egui::Context) {
+        let Some(saved) = self.saved_workspaces.get(name).cloned() else {
+            return;
+        };
+        self.restore_zoom();
+        let previous_focus = self.focused;
+        let mut tree = saved.snapshot.tree;
+        let mut panes: Vec<_> = tree
+            .tiles
+            .iter()
+            .filter_map(|(&tile, pane)| {
+                if let Tile::Pane(Pane::Terminal(id)) = pane {
+                    Some((tile, *id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let same_connection = |current: &Connection, saved: &Connection| {
+            current.name == saved.name && current.target == saved.target
+        };
+        panes.sort_by_key(|&(_, id)| {
+            let original_still_open = self
+                .sources
+                .get(&id)
+                .zip(saved.snapshot.sources.get(&id))
+                .is_some_and(|(current, original)| same_connection(current, original));
+            (!original_still_open, id)
+        });
+        let mut mapped = BTreeMap::new();
+        let mut used = BTreeSet::new();
+        let mut errors = Vec::new();
+        for (tile, old_id) in panes {
+            let Some(source) = saved.snapshot.sources.get(&old_id) else {
+                tree.remove_recursively(tile);
+                continue;
+            };
+            let existing = self
+                .sources
+                .iter()
+                .filter_map(|(&id, current)| {
+                    (same_connection(current, source)
+                        && !used.contains(&id)
+                        && self.sessions.contains_key(&id))
+                    .then_some(id)
+                })
+                .min_by_key(|&id| (id != old_id, id));
+            let id = existing.unwrap_or(self.next_id);
+            if existing.is_none() {
+                self.next_id += 1;
+            }
+            if self.sessions.get(&id).is_none_or(|session| session.exited) {
+                match self.start_existing(id, source, ctx) {
+                    Ok(()) => {
+                        self.sources.insert(id, source.clone());
+                        self.reconnects.remove(&id);
+                    }
+                    Err(error) => {
+                        errors.push(format!("{} — {error}", source.name));
+                        if existing.is_none() {
+                            tree.remove_recursively(tile);
+                            continue;
+                        }
+                    }
+                }
+            }
+            used.insert(id);
+            mapped.insert(old_id, id);
+            tree.tiles.insert(tile, Tile::Pane(Pane::Terminal(id)));
+        }
+        let focus = saved.focused.and_then(|id| mapped.get(&id).copied());
+        let anchor = focus.or_else(|| used.first().copied());
+        if anchor.is_none() && workspace::find(&tree, Pane::Welcome).is_none() {
+            workspace::add_view(&mut tree, Pane::AppInfo, Pane::Welcome);
+        }
+        let anchor_pane = anchor.map_or(Pane::Welcome, Pane::Terminal);
+        for &id in self.sources.keys().filter(|id| !used.contains(id)) {
+            workspace::add_view(&mut tree, anchor_pane, Pane::Terminal(id));
+        }
+        self.tree = tree;
+        self.sidebar_tree = saved
+            .snapshot
+            .sidebar_tree
+            .unwrap_or_else(workspace::sidebar_layout);
+        self.sidebar_view = SidebarView::Sessions;
+        self.settings.sidebar = saved.sidebar_visible;
+        let sidebar_id = egui::Id::new("options_panel");
+        let sidebar_rect = egui::Rect::from_min_size(
+            ctx.content_rect().min,
+            egui::vec2(
+                saved.sidebar_width.clamp(250.0, 420.0),
+                ctx.content_rect().height(),
+            ),
+        );
+        ctx.data_mut(|data| {
+            data.insert_persisted(
+                sidebar_id,
+                egui::containers::panel::PanelState { rect: sidebar_rect },
+            )
+        });
+        self.focused = focus.or(anchor).or(previous_focus);
+        self.focus_terminal_after_layout = self.focused;
+        self.files_focus = None;
+        workspace::ensure_right_views(&mut self.tree);
+        self.sync_extension_views();
+        self.changed();
+        if !errors.is_empty() {
+            self.notice = Some(errors.join("\n"));
+        }
+    }
+
+    fn workspaces_ui(&mut self, ctx: &egui::Context) {
+        if !self.workspace_manager {
+            return;
+        }
+        use xpeed_i18n::t;
+        let mut open = true;
+        let mut save = false;
+        let mut remove = None;
+        let mut load = None;
+        egui::Window::new(t("Workspaces"))
+            .id(egui::Id::new("saved_workspaces"))
+            .open(&mut open)
+            .collapsible(false)
+            .default_width(360.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.workspace_name)
+                            .hint_text(t("Workspace name"))
+                            .char_limit(80),
+                    );
+                    let name = self.workspace_name.trim();
+                    let label = if self.saved_workspaces.contains_key(name) {
+                        "Replace saved workspace"
+                    } else {
+                        "Save current workspace"
+                    };
+                    save = ui
+                        .add_enabled(!name.is_empty(), egui::Button::new(t(label)))
+                        .clicked();
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        for name in self.saved_workspaces.keys() {
+                            ui.horizontal(|ui| {
+                                if ui.button(name).clicked() {
+                                    load = Some(name.clone());
+                                }
+                                if ui.small_button(t("Eliminar")).clicked() {
+                                    remove = Some(name.clone());
+                                }
+                            });
+                        }
+                    });
+            });
+        self.workspace_manager = open && load.is_none();
+        if let Some(name) = load {
+            self.open_workspace(&name, ctx);
+        }
+        if save || remove.is_some() {
+            let mut saved = self.saved_workspaces.clone();
+            if let Some(name) = remove {
+                saved.remove(&name);
+            }
+            if save {
+                self.restore_zoom();
+                let snapshot = Snapshot {
+                    layout_version: 3,
+                    tree: self.tree.clone(),
+                    sources: self.sources.clone(),
+                    sidebar_tree: Some(self.sidebar_tree.clone()),
+                };
+                if !snapshot.validate() {
+                    self.notice = Some(t("This workspace layout could not be saved.").into());
+                    return;
+                }
+                let width =
+                    egui::containers::panel::PanelState::load(ctx, egui::Id::new("options_panel"))
+                        .map_or(300.0, |state| state.size().x);
+                saved.insert(
+                    self.workspace_name.trim().into(),
+                    SavedWorkspace {
+                        snapshot,
+                        focused: self.focused,
+                        sidebar_visible: self.settings.sidebar,
+                        sidebar_width: width,
+                    },
+                );
+            }
+            if !self.ephemeral
+                && let Err(error) = workspace::save_named(&saved)
+            {
+                self.notice = Some(error);
+            } else {
+                self.saved_workspaces = saved;
+            }
+        }
+    }
+
+    fn favorite_ui(&mut self, ctx: &egui::Context) {
+        let Some(editor) = &mut self.favorite_editor else {
+            return;
+        };
+        use xpeed_i18n::t;
+        let mut open = true;
+        let mut save = false;
+        let mut remove = false;
+        egui::Window::new(t("Favorite command"))
+            .id(egui::Id::new("favorite_command"))
+            .open(&mut open)
+            .collapsible(false)
+            .default_width(400.0)
+            .show(ctx, |ui| {
+                field(ui, t("Nombre"), &mut editor.item.name, "");
+                field(
+                    ui,
+                    t("Description"),
+                    &mut editor.item.description,
+                    t("Optional"),
+                );
+                field(ui, t("Command"), &mut editor.item.text, "");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut editor.item.scope, None, t("All connections"));
+                    if let Some(scope) = &editor.scope {
+                        ui.selectable_value(
+                            &mut editor.item.scope,
+                            Some(scope.clone()),
+                            t("This connection"),
+                        );
+                    }
+                });
+                ui.horizontal(|ui| {
+                    save = ui
+                        .add_enabled(
+                            !editor.item.name.trim().is_empty()
+                                && !editor.item.text.trim().is_empty(),
+                            egui::Button::new(t("Guardar")),
+                        )
+                        .clicked();
+                    remove = editor.index.is_some() && ui.button(t("Eliminar")).clicked();
+                });
+            });
+        if save || remove {
+            let mut editor = self.favorite_editor.take().unwrap();
+            let mut favorites = self.history.favorites.clone();
+            if remove {
+                favorites.remove(editor.index.unwrap());
+            } else {
+                editor.item.name = editor.item.name.trim().to_owned();
+                if let Some(index) = editor.index {
+                    favorites[index] = editor.item.clone();
+                } else {
+                    favorites.push(editor.item.clone());
+                }
+            }
+            let previous = std::mem::replace(&mut self.history.favorites, favorites);
+            if !self.ephemeral
+                && let Err(error) = self.history.save()
+            {
+                self.history.favorites = previous;
+                self.favorite_editor = Some(editor);
+                self.notice = Some(error);
+            }
+        } else if !open {
+            self.favorite_editor = None;
+        }
+    }
     fn reconnect_sessions(&mut self, ctx: &egui::Context) {
+        let ready: Vec<_> = self
+            .manual_reconnects
+            .iter()
+            .copied()
+            .filter(|id| self.sessions.get(id).is_some_and(|session| session.exited))
+            .collect();
+        for id in ready {
+            self.manual_reconnects.remove(&id);
+            self.action(Action::Reconnect(id), ctx);
+        }
+        for session in self.sessions.values_mut() {
+            if session.auth_complete && !session.exited {
+                session.disconnect_reason = None;
+            }
+        }
         let newly_disconnected: Vec<_> = self
             .sessions
             .iter()
@@ -1124,7 +1462,7 @@ impl Xpeed {
             for session in self.sessions.values_mut() {
                 if session.reconnecting {
                     session.reconnecting = false;
-                    session.error = None;
+                    session.error = session.disconnect_reason.clone();
                 }
             }
             self.reconnects.clear();
@@ -1141,6 +1479,24 @@ impl Xpeed {
         for id in disconnected {
             self.reconnects
                 .insert(id, (0, now + Duration::from_secs(2)));
+        }
+        for id in self.reconnects.keys() {
+            if let Some(session) = self.sessions.get_mut(id)
+                && !session.exited
+                && !session.auth_complete
+                && !session.awaiting_ssh_input()
+                && now.saturating_duration_since(session.started) >= Duration::from_secs(35)
+            {
+                match session.stop_retry() {
+                    Ok(()) => {
+                        session.disconnect_reason = Some(
+                            xpeed_i18n::t("SSH reconnection did not reach authentication in time.")
+                                .into(),
+                        )
+                    }
+                    Err(error) => self.notice = Some(error),
+                }
+            }
         }
         let ready: Vec<_> = self
             .reconnects
@@ -1163,8 +1519,10 @@ impl Xpeed {
                 ));
             }
             if let Some(source) = self.sources.get(&id).cloned() {
-                if let Err(error) = self.start_existing(id, &source, ctx) {
-                    self.notice = Some(error);
+                if let Err(error) = self.start_existing(id, &source, ctx)
+                    && let Some(session) = self.sessions.get_mut(&id)
+                {
+                    session.disconnect_reason = Some(error);
                 }
                 self.focused = previous_focus;
                 if let Some(widget) = previous_widget {
@@ -1181,7 +1539,7 @@ impl Xpeed {
         }
         for (&id, session) in &mut self.sessions {
             if self.reconnects.contains_key(&id)
-                && ((session.auth_complete && !session.exited) || session.at_password_prompt())
+                && ((session.auth_complete && !session.exited) || session.awaiting_ssh_input())
             {
                 session.error = None;
             }
@@ -1191,13 +1549,14 @@ impl Xpeed {
             .keys()
             .copied()
             .filter(|id| {
-                self.sessions.get(id).is_some_and(|session| {
-                    (session.auth_complete && !session.exited) || session.at_password_prompt()
-                })
+                self.sessions
+                    .get(id)
+                    .is_some_and(|session| session.auth_complete && !session.exited)
             })
             .collect();
         for id in restored {
-            if let Some(session) = self.sessions.get(&id) {
+            if let Some(session) = self.sessions.get_mut(&id) {
+                session.disconnect_reason = None;
                 session.append_notice(&xpeed_i18n::format(
                     "Reconnected · {time}",
                     &[("time", local_clock())],
@@ -1205,9 +1564,15 @@ impl Xpeed {
             }
         }
         self.reconnects.retain(|id, _| {
-            self.sessions
-                .get(id)
-                .is_some_and(|s| (!s.auth_complete || s.exited) && !s.at_password_prompt())
+            self.sessions.get(id).is_some_and(|s| {
+                (!s.auth_complete || s.exited)
+                    && !s.awaiting_ssh_input()
+                    && s.host_key_change.is_none()
+                    && !self
+                        .host_key_prompt
+                        .as_ref()
+                        .is_some_and(|(pending, _)| pending == id)
+            })
         });
         for (&id, session) in &mut self.sessions {
             session.reconnecting = self
@@ -1290,10 +1655,48 @@ impl Xpeed {
             Action::Backup => {
                 self.productivity.backup_open = true;
             }
+            Action::Workspaces => self.workspace_manager = true,
+            Action::OpenWorkspace(name) => self.open_workspace(&name, ctx),
+            Action::NewFavorite(scope, command) => {
+                self.favorite_editor = Some(FavoriteEditor {
+                    index: None,
+                    item: Favorite {
+                        name: command.chars().take(60).collect(),
+                        description: String::new(),
+                        text: command,
+                        scope: scope.clone(),
+                    },
+                    scope,
+                });
+            }
+            Action::EditFavorite(index) => {
+                if let Some(item) = self.history.favorites.get(index).cloned() {
+                    self.favorite_editor = Some(FavoriteEditor {
+                        index: Some(index),
+                        scope: item.scope.clone().or_else(|| {
+                            self.focused
+                                .and_then(|id| self.sources.get(&id))
+                                .map(|connection| connection.target.clone())
+                        }),
+                        item,
+                    });
+                }
+            }
             Action::Reconnect(id) => {
                 self.reconnects.remove(&id);
                 if let Some(session) = self.sessions.get_mut(&id) {
                     preserve_disconnected_session(session);
+                    if !session.exited {
+                        if !self.manual_reconnects.contains(&id) {
+                            match session.stop_retry() {
+                                Ok(()) => {
+                                    self.manual_reconnects.insert(id);
+                                }
+                                Err(error) => self.notice = Some(error),
+                            }
+                        }
+                        return;
+                    }
                     session.append_notice(&xpeed_i18n::format(
                         "Reconnection attempt {attempt} · {time}",
                         &[("attempt", "1".into()), ("time", local_clock())],
@@ -1395,9 +1798,7 @@ impl Xpeed {
                 }
                 self.focused = Some(id);
                 self.show(Pane::Terminal(id));
-                if let Some(widget) = self.sessions.get(&id).and_then(|s| s.input_id) {
-                    ctx.memory_mut(|m| m.request_focus(widget));
-                }
+                self.focus_terminal_after_layout = Some(id);
             }
             Action::ClearCommands => {
                 if let Some(source) = self.focused.and_then(|id| self.sources.get(&id)) {
@@ -1471,8 +1872,15 @@ impl Xpeed {
             Action::Search => {
                 self.show_search = !self.show_search;
                 if self.show_search {
+                    self.search_all = false;
                     ctx.memory_mut(|m| m.request_focus(egui::Id::new("terminal_search")));
                 }
+            }
+            Action::SearchAll => {
+                self.show_search = true;
+                self.search_all = true;
+                self.refresh_search_matches();
+                ctx.memory_mut(|m| m.request_focus(egui::Id::new("terminal_search")));
             }
         }
     }
@@ -1589,6 +1997,8 @@ impl Xpeed {
                     ui.menu_button(xpeed_i18n::t("Vista"), |ui| {
                         for (label, action) in [
                             (xpeed_i18n::t("Conexiones"), Action::Show(Pane::Connections)),
+                            (xpeed_i18n::t("Workspaces"), Action::Workspaces),
+                            (xpeed_i18n::t("Search open terminals"), Action::SearchAll),
                             (
                                 xpeed_i18n::t("Registro de comandos"),
                                 Action::Show(Pane::Commands),
@@ -1951,29 +2361,7 @@ impl Xpeed {
             )
             .show(ctx, |ui| {
                 if self.show_search {
-                    egui::Frame::new()
-                        .fill(p.panel)
-                        .inner_margin(8)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(xpeed_i18n::t("Buscar en terminal"));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.search)
-                                        .id(egui::Id::new("terminal_search"))
-                                        .hint_text(xpeed_i18n::t("Texto a resaltar"))
-                                        .desired_width(250.0),
-                                );
-                                let previous = ui.small_button("↑").on_hover_text(xpeed_i18n::t("Previous")).clicked();
-                                let next = ui.small_button("↓").on_hover_text(xpeed_i18n::t("Next")).clicked();
-                                if (previous || next || ui.input(|i| i.key_pressed(egui::Key::Enter))) && let Some(session) = self.focused.and_then(|id| self.sessions.get_mut(&id)) {
-                                    self.search_result = session.find_text(&self.search, previous);
-                                }
-                                ui.weak(format!("{} / {}", self.search_result.0, self.search_result.1));
-                                if ui.button(xpeed_i18n::t("Cerrar")).clicked() {
-                                    self.show_search = false;
-                                }
-                            });
-                        });
+                    self.terminal_search_ui(ui, p);
                 }
                 let focused_widget = ctx.memory(|memory| memory.focused());
                 let terminal_focus = self
@@ -1987,6 +2375,7 @@ impl Xpeed {
                     && !self.show_palette
                     && self.editor.is_none()
                     && self.access_prompt.is_none()
+                    && self.host_key_prompt.is_none()
                     && !self.remote_files.values().any(|remote| remote.browser.has_dialog())
                     && self.notice.is_none()
                     && !self.show_search;
@@ -2008,10 +2397,14 @@ impl Xpeed {
                     sources: &self.sources,
                     connections: &self.connections,
                     remote_files: &mut self.remote_files,
+                    monitor_session: self.monitor_target.as_ref().map(|(id, _)| *id),
+                    monitor_status: if self.monitor_error.is_some() { "Monitor retry pending" } else if !self.monitor_interest { "Monitor paused" } else if self.monitor_sampled { "Connected" } else { "Conectando…" },
+                    monitor_error: self.monitor_error.as_deref(),
                     assistant: &mut self.assistant,
                     extensions: &mut self.extensions,
                     terminal_context: terminal_context.as_deref(),
                     history: &self.history,
+                    saved_workspaces: &self.saved_workspaces,
                     activity: &self.activity,
                     focused: &mut self.focused,
                     palette: p,
@@ -2047,11 +2440,139 @@ impl Xpeed {
             self.action(action, ctx);
         }
     }
+    fn refresh_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.search_submitted = !self.search.is_empty();
+        self.search_truncated = false;
+        if self.search.is_empty() {
+            return;
+        }
+        for (&id, session) in &self.sessions {
+            let matches = session.search_matches(&self.search, 101);
+            self.search_truncated |= matches.len() > 100;
+            self.search_matches
+                .extend(matches.into_iter().take(100).map(|result| (id, result)));
+        }
+    }
+
+    fn terminal_search_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
+        use xpeed_i18n::t;
+        let mut jump = None;
+        egui::Frame::new()
+            .fill(palette.panel)
+            .inner_margin(8)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let input = ui.add(
+                        egui::TextEdit::singleline(&mut self.search)
+                            .id(egui::Id::new("terminal_search"))
+                            .hint_text(t("Buscar en terminal"))
+                            .desired_width(ui.available_width().clamp(120.0, 230.0)),
+                    );
+                    let enter = (input.has_focus() || input.lost_focus())
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let change_scope = ui
+                        .selectable_value(&mut self.search_all, false, t("This terminal"))
+                        .changed()
+                        | ui.selectable_value(&mut self.search_all, true, t("All open terminals"))
+                            .changed();
+                    if self.search_all {
+                        if input.changed() {
+                            self.search_matches.clear();
+                            self.search_submitted = false;
+                        }
+                        if ui.button(t("Search")).clicked() || enter || change_scope {
+                            self.refresh_search_matches();
+                        }
+                    } else {
+                        if input.changed() || change_scope {
+                            self.search_result = (0, 0);
+                        }
+                        let previous = ui.small_button("↑").on_hover_text(t("Previous")).clicked();
+                        let next = ui.small_button("↓").on_hover_text(t("Next")).clicked();
+                        if (previous || next || enter)
+                            && let Some(session) =
+                                self.focused.and_then(|id| self.sessions.get_mut(&id))
+                        {
+                            self.search_result = session.find_text(&self.search, previous);
+                        }
+                        ui.weak(format!(
+                            "{} / {}",
+                            self.search_result.0, self.search_result.1
+                        ));
+                    }
+                    if ui.button(t("Cerrar")).clicked() {
+                        self.show_search = false;
+                    }
+                });
+                if self.search_all
+                    && self.show_search
+                    && self.search_submitted
+                    && self.search_matches.is_empty()
+                {
+                    ui.weak(t("No matches found."));
+                }
+                if self.search_all && self.show_search && !self.search_matches.is_empty() {
+                    if self.search_truncated {
+                        ui.weak(t("Recent matches per terminal are shown."));
+                    }
+                    egui::ScrollArea::vertical()
+                        .id_salt("terminal_search_results")
+                        .max_height((ui.available_height() * 0.32).clamp(0.0, 170.0))
+                        .show(ui, |ui| {
+                            let mut last = None;
+                            for (index, (id, hit)) in self.search_matches.iter().enumerate() {
+                                let Some(session) = self.sessions.get(id) else {
+                                    continue;
+                                };
+                                if last != Some(*id) {
+                                    let name = self
+                                        .sources
+                                        .get(id)
+                                        .map_or(session.title.as_str(), |source| {
+                                            source.name.as_str()
+                                        });
+                                    ui.label(RichText::new(format!("{name} · #{id}")).strong());
+                                    last = Some(*id);
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(RichText::new(&hit.text).monospace())
+                                            .truncate(),
+                                    )
+                                    .on_hover_text(&hit.text)
+                                    .clicked()
+                                {
+                                    jump = Some(index);
+                                }
+                            }
+                        });
+                }
+            });
+        if let Some(index) = jump {
+            let (id, hit) = &self.search_matches[index];
+            let id = *id;
+            if self
+                .sessions
+                .get_mut(&id)
+                .is_some_and(|session| session.reveal_match(&self.search, hit))
+            {
+                self.restore_zoom();
+                self.show(Pane::Terminal(id));
+                self.focused = Some(id);
+            } else {
+                self.refresh_search_matches();
+            }
+        }
+    }
+
     fn overlays(&mut self, ctx: &egui::Context) {
         self.host_key_window(ctx);
         self.access_window(ctx);
 
         self.connection_window(ctx);
+        self.workspaces_ui(ctx);
+        self.favorite_ui(ctx);
         self.palette_window(ctx);
         if let Some(notice) = self.notice.clone() {
             let mut open = true;
@@ -2242,10 +2763,22 @@ impl Xpeed {
             sources: &self.sources,
             connections: &self.connections,
             remote_files: &mut self.remote_files,
+            monitor_session: self.monitor_target.as_ref().map(|(id, _)| *id),
+            monitor_status: if self.monitor_error.is_some() {
+                "Monitor retry pending"
+            } else if !self.monitor_interest {
+                "Monitor paused"
+            } else if self.monitor_sampled {
+                "Connected"
+            } else {
+                "Conectando…"
+            },
+            monitor_error: self.monitor_error.as_deref(),
             assistant: &mut self.assistant,
             extensions: &mut self.extensions,
             terminal_context: None,
             history: &self.history,
+            saved_workspaces: &self.saved_workspaces,
             activity: &self.activity,
             focused: &mut self.focused,
             palette: p,
@@ -2377,6 +2910,12 @@ impl Xpeed {
                             ui.label(xpeed_i18n::t("Tamaño del texto de la terminal"));
                             changed |= ui.add(egui::Slider::new(&mut self.settings.font_size, 11.0..=24.0).suffix(" px")).changed();
                             ui.weak(format!("{}: {:.2} ms", xpeed_i18n::t("Interface CPU time"), self.frame_cost_ms));
+                            if self.frame_samples.len() >= 20 {
+                                let mut sorted: Vec<_> = self.frame_samples.iter().copied().collect();
+                                sorted.sort_unstable_by(f32::total_cmp);
+                                let p95 = sorted[(sorted.len() * 95).div_ceil(100) - 1];
+                                ui.weak(format!("{}: {:.2} ms ({} {})", xpeed_i18n::t("Interface time p95"), p95, sorted.len(), xpeed_i18n::t("frames")));
+                            }
                             ui.label(xpeed_i18n::t("Terminal scrollback lines"));
                             changed |= ui.add(egui::Slider::new(&mut self.settings.scrollback_lines, 100..=50000).logarithmic(true)).changed();
                         });
@@ -2812,6 +3351,11 @@ impl Xpeed {
         self.activity_rail(ctx);
         self.sidebar_panel(ctx);
         self.central(ctx);
+        if let Some(id) = self.focus_terminal_after_layout.take()
+            && let Some(widget) = self.sessions.get(&id).and_then(|session| session.input_id)
+        {
+            ctx.memory_mut(|memory| memory.request_focus(widget));
+        }
         self.overlays(ctx);
         self.extensions.review_ui(ctx);
         self.productivity.show(
@@ -2911,8 +3455,12 @@ impl eframe::App for Xpeed {
         self.window_size.update(ctx, frame);
         let start = Instant::now();
         self.frame(ctx);
-        self.frame_cost_ms =
-            self.frame_cost_ms * 0.9 + start.elapsed().as_secs_f32() * 1000.0 * 0.1;
+        let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+        self.frame_cost_ms = self.frame_cost_ms * 0.9 + elapsed_ms * 0.1;
+        if self.frame_samples.len() == 120 {
+            self.frame_samples.pop_front();
+        }
+        self.frame_samples.push_back(elapsed_ms);
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.flush_commands();
@@ -2926,10 +3474,14 @@ struct WorkspaceUi<'a> {
     sources: &'a BTreeMap<u64, Connection>,
     connections: &'a ConnectionStore,
     remote_files: &'a mut BTreeMap<u64, RemoteExplorer>,
+    monitor_session: Option<u64>,
+    monitor_status: &'static str,
+    monitor_error: Option<&'a str>,
     assistant: &'a mut Assistant,
     extensions: &'a mut crate::extensions::Extensions,
     terminal_context: Option<&'a str>,
     history: &'a History,
+    saved_workspaces: &'a workspace::SavedWorkspaces,
     activity: &'a [String],
     focused: &'a mut Option<u64>,
     palette: Palette,
@@ -2976,20 +3528,65 @@ impl WorkspaceUi<'_> {
             }
         }
         if let Some(session) = self.sessions.get(&id) {
-            ui.label(if session.exited {
-                xpeed_i18n::t("Sesión finalizada")
+            let status = if session.reconnecting {
+                "Reconnecting"
+            } else if session.exited {
+                "Sesión finalizada"
+            } else if session.awaiting_ssh_input() {
+                "Waiting for SSH input"
             } else if session.remote.is_some() && !session.auth_complete {
-                xpeed_i18n::t("Conectando…")
+                "Conectando…"
             } else {
-                xpeed_i18n::t("Sesión activa")
-            });
+                "Sesión activa"
+            };
+            if session.remote.is_some() {
+                egui::CollapsingHeader::new(xpeed_i18n::t("Connection diagnostics"))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.label(format!("SSH · {}", xpeed_i18n::t(status)));
+                        if let Some(error) = &session.error {
+                            ui.add(egui::Label::new(error).wrap());
+                        }
+                        if let Some(remote) = self.remote_files.get(&id) {
+                            let sftp = if remote.loading {
+                                "Conectando…"
+                            } else if remote.error.is_some() {
+                                "Connection or file error"
+                            } else if remote.operation_running() {
+                                "File operation in progress"
+                            } else if remote.authenticated {
+                                "Connected"
+                            } else {
+                                "Desconectada"
+                            };
+                            ui.label(format!("SFTP · {}", xpeed_i18n::t(sftp)));
+                            if let Some(error) = &remote.error {
+                                ui.add(egui::Label::new(error).wrap());
+                            }
+                        }
+                        let monitor = if self.monitor_session == Some(id) {
+                            self.monitor_status
+                        } else {
+                            "Monitor paused"
+                        };
+                        ui.label(format!(
+                            "{} · {}",
+                            xpeed_i18n::t("Monitor del servidor"),
+                            xpeed_i18n::t(monitor)
+                        ));
+                        if self.monitor_session == Some(id)
+                            && let Some(error) = self.monitor_error
+                        {
+                            ui.add(egui::Label::new(error).wrap());
+                        }
+                    });
+            } else {
+                ui.label(xpeed_i18n::t(status));
+            }
             ui.label(xpeed_i18n::format(
                 "Tiempo abierto: {} min",
                 &[("0", format!("{}", session.started.elapsed().as_secs() / 60))],
             ));
-            if let Some(error) = &session.error {
-                ui.add(egui::Label::new(error).wrap());
-            }
         }
         if let Some(remote) = self.remote_files.get(&id) {
             ui.separator();
@@ -3004,12 +3601,11 @@ impl WorkspaceUi<'_> {
                 "Elementos: {}",
                 &[("0", format!("{}", remote.entries.len()))],
             ));
-            if remote.busy() {
-                ui.label(xpeed_i18n::t("Archivos: cargando…"));
-            }
-            if let Some(error) = &remote.error {
-                ui.add(egui::Label::new(error).wrap());
-            }
+        }
+        if self.sessions.get(&id).is_some_and(|session| {
+            session.remote.is_some() && session.auth_complete && !session.exited
+        }) {
+            self.extensions.server_monitor_ui(ui, id);
         }
     }
     fn connections_ui(&mut self, ui: &mut egui::Ui) {
@@ -3124,13 +3720,76 @@ impl WorkspaceUi<'_> {
         });
     }
     fn commands_ui(&mut self, ui: &mut egui::Ui) {
+        use xpeed_i18n::t;
+        let selected = self.focused.and_then(|id| self.sources.get(&id));
+        let scope = selected.map(|source| &source.target);
+        let mode_id = ui.id().with("commands_mode");
+        let mut favorites = ui
+            .data(|data| data.get_temp::<bool>(mode_id))
+            .unwrap_or(false);
+        if let Some(source) = selected {
+            ui.label(RichText::new(&source.name).strong());
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut favorites, false, t("History"));
+            ui.selectable_value(&mut favorites, true, t("Favorites"));
+            if favorites && ui.small_button(t("Add favorite")).clicked() {
+                self.actions
+                    .push(Action::NewFavorite(scope.cloned(), String::new()));
+            }
+        });
+        ui.data_mut(|data| data.insert_temp(mode_id, favorites));
+        if favorites {
+            let target = self.focused.filter(|id| {
+                self.sessions.get(id).is_some_and(|session| {
+                    !session.exited && (session.remote.is_none() || session.auth_complete)
+                })
+            });
+            egui::ScrollArea::vertical()
+                .id_salt("command_favorites")
+                .show(ui, |ui| {
+                    let mut empty = true;
+                    for (index, item) in self.history.favorites.iter().enumerate() {
+                        if item.scope.is_some() && item.scope.as_ref() != scope {
+                            continue;
+                        }
+                        empty = false;
+                        ui.push_id(index, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                if ui
+                                    .add_enabled(
+                                        target.is_some(),
+                                        egui::Button::new(&item.name).wrap(),
+                                    )
+                                    .on_hover_text(&item.text)
+                                    .clicked()
+                                    && let Some(id) = target
+                                {
+                                    self.actions
+                                        .push(Action::InsertCommand(id, item.text.clone()));
+                                }
+                                if ui.small_button(t("Editar")).clicked() {
+                                    self.actions.push(Action::EditFavorite(index));
+                                }
+                            });
+                            if !item.description.is_empty() {
+                                ui.weak(&item.description);
+                            }
+                        });
+                    }
+                    if empty {
+                        ui.weak(t("No favorite commands here yet."));
+                    }
+                });
+            return;
+        }
         let Some(id) = *self.focused else {
             ui.label(xpeed_i18n::t(
                 "Los comandos de la conexión activa aparecerán aquí.",
             ));
             return;
         };
-        let Some(source) = self.sources.get(&id) else {
+        let Some(source) = selected else {
             return;
         };
         let prefix = format!("{} :: ", connection_key(source));
@@ -3150,6 +3809,10 @@ impl WorkspaceUi<'_> {
                 if row.clicked() { self.actions.push(Action::InsertCommand(id, record.text.clone())); }
                 row.on_hover_text(xpeed_i18n::t("Click to insert into the terminal. Right-click to copy.")).context_menu(|ui| {
                     if ui.button(xpeed_i18n::t("Copiar comando")).clicked() { ui.ctx().copy_text(record.text.clone()); ui.close(); }
+                    if ui.button(t("Save as favorite")).clicked() {
+                        self.actions.push(Action::NewFavorite(Some(source.target.clone()), record.text.clone()));
+                        ui.close();
+                    }
                 });
             }
             if records.is_empty() { ui.label(RichText::new(xpeed_i18n::t("Sin comandos registrados. Se detectan los prompts estándar de PowerShell, CMD y shells Unix.")).small()); }
@@ -3250,9 +3913,11 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
                 crate::about::show(ui, p, active);
             }
             Pane::ServerInfo => {
-                egui::Frame::new()
-                    .inner_margin(12)
-                    .show(ui, |ui| self.server_info_ui(ui));
+                egui::Frame::new().inner_margin(12).show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("server_info")
+                        .show(ui, |ui| self.server_info_ui(ui));
+                });
             }
             Pane::ExtensionDetails(key) => self.extensions.details_ui(ui, key),
             Pane::ExtensionView(id) => {
@@ -3309,6 +3974,19 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
                         self.actions.push(Action::NewConnection);
                     }
                     ui.add_space(25.0);
+                    if ui.button(xpeed_i18n::t("Workspaces")).clicked() {
+                        self.actions.push(Action::Workspaces);
+                    }
+                    if !self.saved_workspaces.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            for name in self.saved_workspaces.keys().take(6) {
+                                if ui.button(name).clicked() {
+                                    self.actions.push(Action::OpenWorkspace(name.clone()));
+                                }
+                            }
+                        });
+                        ui.add_space(12.0);
+                    }
                     if !self.connections.recent.is_empty() {
                         ui.label(
                             RichText::new(xpeed_i18n::t("CONEXIONES RECIENTES"))
@@ -3364,6 +4042,7 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
                 if let Some(session) = self.sessions.get_mut(&id) {
                     let has_status = session.exited
                         || session.error.is_some()
+                        || session.disconnect_reason.is_some()
                         || session.recovered_draft.is_some();
                     let area = ui.available_rect_before_wrap();
                     let height_id = ui.id().with(("terminal_status_height", id));
@@ -3621,6 +4300,7 @@ impl Behavior<Pane> for WorkspaceUi<'_> {
                         ui.close();
                     }
                     if ui.button(xpeed_i18n::t("Buscar en terminal")).clicked() {
+                        *self.focused = Some(id);
                         self.actions.push(Action::Search);
                         ui.close();
                     }
@@ -4016,7 +4696,11 @@ fn preserve_disconnected_session(session: &mut Session) {
 }
 
 fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool {
-    if !session.exited && session.error.is_none() && session.recovered_draft.is_none() {
+    if !session.exited
+        && session.error.is_none()
+        && session.disconnect_reason.is_none()
+        && session.recovered_draft.is_none()
+    {
         return false;
     }
     let mut reconnect = false;
@@ -4031,7 +4715,11 @@ fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool
         .show(ui, |ui| {
             ui.set_min_width((ui.available_width() - 4.0).max(0.0));
             ui.horizontal(|ui| {
-                let status = if session.reconnecting {
+                let status = if !session.exited && session.awaiting_ssh_input() {
+                    "Waiting for SSH input"
+                } else if session.reconnecting
+                    || !session.exited && session.disconnect_reason.is_some()
+                {
                     "Reconnecting"
                 } else if session.exited {
                     "Session disconnected"
@@ -4042,9 +4730,11 @@ fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool
                 };
                 ui.label(RichText::new(xpeed_i18n::t(status)).strong().color(p.muted));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if session.exited && !session.reconnecting {
-                        reconnect = ui.button(xpeed_i18n::t("Reconnect")).clicked();
-                    } else if session.reconnecting {
+                    if session.exited {
+                        reconnect = ui.button(xpeed_i18n::t("Reconnect now")).clicked();
+                    } else if !session.awaiting_ssh_input()
+                        && (session.reconnecting || session.disconnect_reason.is_some())
+                    {
                         ui.spinner();
                     }
                 });
@@ -4059,6 +4749,14 @@ fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool
                     .wrap(),
                 );
             }
+            if let Some(reason) = &session.disconnect_reason {
+                ui.add(egui::Label::new(RichText::new(reason).small().color(p.muted)).wrap());
+            }
+            if session.reconnecting
+                && let Some(progress) = &session.error
+            {
+                ui.label(progress);
+            }
             if let Some(error) = &session.error {
                 egui::CollapsingHeader::new(xpeed_i18n::t("Technical details"))
                     .id_salt(("terminal_status_details", session.id))
@@ -4067,7 +4765,15 @@ fn terminal_status(ui: &mut egui::Ui, session: &mut Session, p: Palette) -> bool
                             egui::Label::new(RichText::new(error).small().color(p.muted)).wrap(),
                         );
                         if ui.small_button(xpeed_i18n::t("Copy details")).clicked() {
-                            ui.ctx().copy_text(error.clone());
+                            let details = session
+                                .disconnect_reason
+                                .as_ref()
+                                .filter(|reason| *reason != error)
+                                .map_or_else(
+                                    || error.clone(),
+                                    |reason| format!("{reason}\n{error}"),
+                                );
+                            ui.ctx().copy_text(details);
                         }
                     });
             }

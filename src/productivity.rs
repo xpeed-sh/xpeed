@@ -76,12 +76,110 @@ struct Editor {
     password: Option<crate::credentials::Secret>,
     original: String,
     text: String,
-    receiver: Option<Receiver<Result<String, String>>>,
-    saving: bool,
+    receiver: Option<Receiver<Result<EditorResult, String>>>,
+    comparison: Option<String>,
+    conflict: Option<String>,
     loaded: bool,
     confirm_close: bool,
     error: Option<String>,
     cancel: Arc<AtomicBool>,
+}
+
+enum EditorResult {
+    Content { text: String, saved: bool },
+    Conflict(String),
+}
+
+impl Editor {
+    fn save(&mut self, ctx: &egui::Context, path: &str, expected: String) {
+        let (tx, rx) = mpsc::channel();
+        self.receiver = Some(rx);
+        self.error = None;
+        let config = self.config.clone();
+        let password = self.password.clone();
+        let path = path.to_owned();
+        let text = self.text.clone();
+        let cancel = self.cancel.clone();
+        let wake = ctx.clone();
+        std::thread::spawn(move || {
+            let result =
+                crate::sftp::replace_text(&config, password, cancel, &path, &expected, &text, None)
+                    .map(|outcome| match outcome {
+                        crate::sftp::ReplaceOutcome::Written => {
+                            EditorResult::Content { text, saved: true }
+                        }
+                        crate::sftp::ReplaceOutcome::Conflict(server) => {
+                            EditorResult::Conflict(server)
+                        }
+                    });
+            let _ = tx.send(result);
+            wake.request_repaint();
+        });
+    }
+}
+
+fn line_changes(before: &str, after: &str) -> String {
+    use std::fmt::Write as _;
+    let before: Vec<_> = before.split_inclusive('\n').collect();
+    let after: Vec<_> = after.split_inclusive('\n').collect();
+    let prefix = before
+        .iter()
+        .zip(&after)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let suffix = before[prefix..]
+        .iter()
+        .rev()
+        .zip(after[prefix..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let old = &before[prefix..before.len() - suffix];
+    let new = &after[prefix..after.len() - suffix];
+    let width = new.len() + 1;
+    let mut output = String::new();
+    let mut row = |marker, line: usize, text: &str| {
+        let _ = writeln!(
+            output,
+            "{marker} {:>5}  {}",
+            prefix + line + 1,
+            text.strip_suffix('\n').unwrap_or(text)
+        );
+    };
+    if (old.len() + 1).saturating_mul(width) > 1_000_000 {
+        for (index, text) in old.iter().enumerate() {
+            row('-', index, text);
+        }
+        for (index, text) in new.iter().enumerate() {
+            row('+', index, text);
+        }
+        return output;
+    }
+    let mut shared = vec![0u32; (old.len() + 1) * width];
+    for i in (0..old.len()).rev() {
+        for j in (0..new.len()).rev() {
+            shared[i * width + j] = if old[i] == new[j] {
+                1 + shared[(i + 1) * width + j + 1]
+            } else {
+                shared[(i + 1) * width + j].max(shared[i * width + j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    while i < old.len() || j < new.len() {
+        if i < old.len() && j < new.len() && old[i] == new[j] {
+            i += 1;
+            j += 1;
+        } else if j == new.len()
+            || (i < old.len() && shared[(i + 1) * width + j] >= shared[i * width + j + 1])
+        {
+            row('-', i, old[i]);
+            i += 1;
+        } else {
+            row('+', j, new[j]);
+            j += 1;
+        }
+    }
+    output
 }
 impl Drop for Editor {
     fn drop(&mut self) {
@@ -190,7 +288,10 @@ impl State {
                     let stop = cancel.clone();
                     let wake = ctx.clone();
                     std::thread::spawn(move || {
-                        let _ = tx.send(crate::sftp::tool_read(&cfg, secret, stop, &path, None));
+                        let _ = tx.send(
+                            crate::sftp::tool_read(&cfg, secret, stop, &path, None)
+                                .map(|text| EditorResult::Content { text, saved: false }),
+                        );
                         wake.request_repaint();
                     });
                     Editor {
@@ -199,7 +300,8 @@ impl State {
                         original: String::new(),
                         text: String::new(),
                         receiver: Some(rx),
-                        saving: false,
+                        comparison: None,
+                        conflict: None,
                         loaded: false,
                         confirm_close: false,
                         error: None,
@@ -232,21 +334,24 @@ impl State {
                 };
                 if let Some(result) = result {
                     match result {
-                        Ok(text) => {
+                        Ok(EditorResult::Content { text, saved }) => {
                             editor.original = text.clone();
                             editor.text = text;
                             editor.loaded = true;
                             editor.error = None;
-                            if editor.saving
-                                && let Some(remote) = remotes.get_mut(id)
-                            {
+                            editor.comparison = None;
+                            editor.conflict = None;
+                            if saved && let Some(remote) = remotes.get_mut(id) {
                                 remote.refresh();
                             }
+                        }
+                        Ok(EditorResult::Conflict(server)) => {
+                            editor.comparison = Some(line_changes(&server, &editor.text));
+                            editor.conflict = Some(server);
                         }
                         Err(error) => editor.error = Some(error),
                     }
                     editor.receiver = None;
-                    editor.saving = false;
                 }
             }
             let mut open = true;
@@ -258,35 +363,22 @@ impl State {
                 .show(ctx, |ui| {
                     let dirty = editor.text != editor.original;
                     let language = editor_language(path);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui
                             .add_enabled(
                                 editor.loaded
                                     && editor.receiver.is_none()
+                                    && editor.conflict.is_none()
                                     && dirty
                                     && editor.text.len() <= 65536,
                                 egui::Button::new(t("Guardar")),
                             )
                             .clicked()
                         {
-                            let (tx, rx) = mpsc::channel();
-                            editor.receiver = Some(rx);
-                            editor.saving = true;
-                            let config = editor.config.clone();
-                            let password = editor.password.clone();
-                            let path = path.clone();
-                            let original = editor.original.clone();
-                            let text = editor.text.clone();
-                            let cancel = editor.cancel.clone();
-                            let wake = ctx.clone();
-                            std::thread::spawn(move || {
-                                let result = crate::sftp::tool_replace(
-                                    &config, password, cancel, &path, &original, &text, None,
-                                )
-                                .map(|()| text);
-                                let _ = tx.send(result);
-                                wake.request_repaint();
-                            });
+                            editor.save(ctx, path, editor.original.clone());
+                        }
+                        if ui.add_enabled(dirty || editor.conflict.is_some(), egui::Button::new(t("View changes"))).clicked() {
+                            editor.comparison = Some(line_changes(editor.conflict.as_deref().unwrap_or(&editor.original), &editor.text));
                         }
                         let status = t(if dirty {
                             "Unsaved changes"
@@ -303,6 +395,52 @@ impl State {
                     });
                     if let Some(error) = &editor.error {
                         ui.colored_label(ui.visuals().error_fg_color, error);
+                    }
+                    if editor.conflict.is_some() {
+                        ui.add(egui::Label::new(t("The remote file changed while you were editing. Review your draft against the current server version.")).wrap());
+                    }
+                    if editor.comparison.is_some() {
+                        let mut back = false;
+                        let mut replace = false;
+                        ui.horizontal_wrapped(|ui| {
+                            back = ui.button(t("Back to editor")).clicked();
+                            if editor.conflict.is_some() {
+                                replace = ui.add_enabled(
+                                    editor.receiver.is_none() && editor.text.len() <= 65536,
+                                    egui::Button::new(t("Replace reviewed server version")),
+                                ).clicked();
+                            }
+                        });
+                        if replace && let Some(server) = editor.conflict.clone() {
+                            editor.save(ctx, path, server);
+                        }
+                        if back {
+                            editor.comparison = None;
+                            return;
+                        }
+                        let comparison = editor.comparison.as_deref().unwrap_or_default();
+                        if comparison.is_empty() {
+                            ui.weak(t("No differences."));
+                        } else {
+                            let lines: Vec<_> = comparison.lines().collect();
+                            let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+                            egui::ScrollArea::both().id_salt("remote_comparison")
+                                .scroll_source(egui::scroll_area::ScrollSource {
+                                    drag: false, ..egui::scroll_area::ScrollSource::ALL
+                                })
+                                .show_rows(ui, row_height, lines.len(), |ui, range| {
+                                    for line in &lines[range] {
+                                        let (color, hint) = if line.starts_with('-') {
+                                            (ui.visuals().error_fg_color, "Removed from server version")
+                                        } else {
+                                            (ui.visuals().hyperlink_color, "Added in your draft")
+                                        };
+                                        ui.add(egui::Label::new(egui::RichText::new(*line).monospace().color(color))
+                                            .selectable(true).extend()).on_hover_text(t(hint));
+                                    }
+                                });
+                        }
+                        return;
                     }
                     egui::ScrollArea::both().show(ui, |ui| {
                         let mut layouter =
@@ -396,6 +534,59 @@ impl State {
 mod tests {
     use super::*;
     #[test]
+    fn comparison_lists_changed_lines_with_their_original_line_numbers() {
+        let before = "unchanged\nold value\nkeep this\nsecond old value\nend\n";
+        let after = "unchanged\nnew value\nkeep this\nsecond new value\nend\n";
+        assert_eq!(
+            line_changes(before, after),
+            "-     2  old value\n+     2  new value\n-     4  second old value\n+     4  second new value\n"
+        );
+        assert!(line_changes(before, before).is_empty());
+    }
+
+    #[test]
+    fn remote_conflict_preserves_the_draft_and_opens_the_server_comparison() {
+        let ctx = egui::Context::default();
+        let mut state = State::default();
+        let path = (7, "/edit.txt".to_owned());
+        let (tx, rx) = mpsc::channel();
+        state.editors.insert(
+            path.clone(),
+            Editor {
+                config: Default::default(),
+                password: None,
+                original: "original\n".into(),
+                text: "draft\n".into(),
+                receiver: Some(rx),
+                comparison: None,
+                conflict: None,
+                loaded: true,
+                confirm_close: false,
+                error: None,
+                cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        tx.send(Ok(EditorResult::Conflict("changed on server\n".into())))
+            .unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            state.show(
+                ctx,
+                &mut Settings::default(),
+                &mut ConnectionStore::default(),
+                &mut BTreeMap::new(),
+                &BTreeMap::new(),
+                true,
+            )
+        });
+        let editor = &state.editors[&path];
+        assert_eq!(editor.text, "draft\n");
+        assert_eq!(editor.original, "original\n");
+        assert_eq!(editor.conflict.as_deref(), Some("changed on server\n"));
+        let comparison = editor.comparison.as_deref().unwrap();
+        assert!(comparison.contains("-     1  changed on server"));
+        assert!(comparison.contains("+     1  draft"));
+    }
+    #[test]
     fn editor_selects_lightweight_syntax_from_remote_path() {
         assert_eq!(
             editor_language("/srv/install.sh"),
@@ -418,7 +609,8 @@ mod tests {
                 original: "old".into(),
                 text: "new".into(),
                 receiver: None,
-                saving: false,
+                comparison: None,
+                conflict: None,
                 loaded: true,
                 confirm_close: true,
                 error: None,

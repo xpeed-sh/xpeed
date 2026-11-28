@@ -1,4 +1,4 @@
-use super::{ChatMessage, Runtime, approvals_ui, session_tools};
+use super::{ChatMessage, Runtime, approvals_ui, panel_menu, session_tools};
 use eframe::egui::{self, RichText};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -33,6 +33,69 @@ fn new_conversation(runtime: &mut Runtime) {
     runtime.error = None;
     runtime.draft.clear();
     runtime.chat_page = Page::Chat;
+}
+
+fn new_from_current(runtime: &mut Runtime) {
+    use std::fmt::Write;
+    let mut transcript = String::new();
+    for message in &runtime.messages {
+        let _ = writeln!(transcript, "{}\n{}\n", message.role, message.text);
+        if transcript.len() > 1024 * 1024 {
+            runtime.error = Some(t("Attachments exceed the 1 MB total message limit.").into());
+            return;
+        }
+    }
+    let mut attachments = super::attachments::State::default();
+    attachments.accept(t("Conversation context.txt").into(), transcript);
+    if !attachments.has_files() {
+        runtime.error = Some(t("Attachments exceed the 1 MB total message limit.").into());
+        return;
+    }
+    new_conversation(runtime);
+    runtime.attachments = attachments;
+}
+
+pub(super) fn context_actions(
+    runtime: &mut Runtime,
+    ui: &mut egui::Ui,
+    targets: &BTreeMap<u64, session_tools::Target>,
+) {
+    if !runtime.ready || runtime.account.is_none() {
+        return;
+    }
+    ui.separator();
+    if runtime
+        .manifest
+        .capabilities
+        .iter()
+        .any(|cap| cap == "sessionTools")
+    {
+        ui.menu_button(t("Select sessions"), |ui| {
+            sessions_menu(runtime, ui, targets)
+        });
+    }
+    let can_start = !runtime.busy
+        && runtime.deferred_actions.is_empty()
+        && !runtime.attachments.has_files()
+        && runtime.tools.attached.is_empty();
+    if ui
+        .add_enabled(can_start, egui::Button::new(t("New conversation")))
+        .clicked()
+    {
+        new_conversation(runtime);
+        ui.close();
+    }
+    let can_branch = can_start && runtime.chat_page == Page::Chat && !runtime.messages.is_empty();
+    if ui
+        .add_enabled(
+            can_branch,
+            egui::Button::new(t("New chat from this conversation")),
+        )
+        .clicked()
+    {
+        new_from_current(runtime);
+        ui.close();
+    }
 }
 
 pub(super) fn show(
@@ -222,9 +285,16 @@ fn conversations(
     usage_limits(runtime, ui);
     ui.add_space(8.0);
     composer(runtime, ui, targets, fragment, true);
+    remember_footer(ui, footer_id, footer_height, footer_start);
+}
+
+fn remember_footer(ui: &egui::Ui, footer_id: egui::Id, previous_height: f32, footer_start: f32) {
     let footer_height = ui.cursor().min.y - footer_start + ui.spacing().item_spacing.y;
     ui.ctx()
         .data_mut(|data| data.insert_temp(footer_id, footer_height));
+    if (footer_height - previous_height).abs() > 0.5 {
+        ui.ctx().request_repaint();
+    }
 }
 
 fn chat_row(ui: &mut egui::Ui, key: &str, name: &str, can_delete: bool) -> (bool, bool) {
@@ -337,13 +407,19 @@ fn conversation(
                 }
             },
         );
-        ui.add_sized(
+        let title_editor = ui.make_persistent_id("conversation_title");
+        panel_menu::before_editor(ui, title_editor, &mut runtime.chat_title);
+        let title_response = ui.add_sized(
             [title_width, 28.0],
             egui::TextEdit::singleline(&mut runtime.chat_title)
+                .id(title_editor)
                 .frame(false)
                 .horizontal_align(egui::Align::Center)
                 .hint_text(t("New conversation")),
         );
+        let range = egui::TextEdit::load_state(ui.ctx(), title_editor)
+            .and_then(|state| state.cursor.char_range());
+        panel_menu::remember_editor_range(ui, &runtime.chat_title, &title_response, range);
         ui.allocate_ui_with_layout(
             egui::vec2(side, 28.0),
             egui::Layout::right_to_left(egui::Align::Center),
@@ -355,17 +431,24 @@ fn conversation(
         );
     });
     ui.add_space(8.0);
-    let reserve = 145.0 + runtime.attachments.reserved_height();
     let awaiting = runtime
         .tools
         .actions
         .iter()
         .any(|action| action.state == "awaitingApproval");
-    let body_height =
-        (ui.available_height() - reserve - if awaiting { 155.0 } else { 0.0 }).max(40.0);
+    let footer_id = ui
+        .id()
+        .with(("chat_footer", &runtime.manifest.id, awaiting));
+    let footer_height = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(footer_id))
+        .unwrap_or(if awaiting { 390.0 } else { 240.0 });
+    let body_height = (ui.available_height() - footer_height).max(0.0);
     egui::ScrollArea::vertical()
         .id_salt(("codex_messages", runtime.thread_id.clone()))
+        .scroll_source(panel_menu::TEXT_SCROLL)
         .max_height(body_height)
+        .min_scrolled_height(0.0)
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
@@ -381,9 +464,11 @@ fn conversation(
             approvals_ui(runtime, ui);
             error(runtime, ui);
         });
+    let footer_start = ui.cursor().min.y;
     ui.add_space(8.0);
     pending_approvals(runtime, ui, targets);
     composer(runtime, ui, targets, fragment, false);
+    remember_footer(ui, footer_id, footer_height, footer_start);
 }
 
 fn composer(
@@ -439,18 +524,38 @@ fn composer(
                 .max_height(144.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.add_enabled(
-                        !runtime.busy,
-                        egui::TextEdit::multiline(if new_chat {
-                            &mut runtime.home_draft
-                        } else {
-                            &mut runtime.draft
-                        })
-                        .frame(false)
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(t("Ask for changes or a task…")),
-                    );
+                    let editor_id = ui.make_persistent_id("draft_editor");
+                    if !runtime.busy && ui.memory(|memory| memory.has_focus(editor_id)) {
+                        let attached = ui.input_mut(|input| {
+                            let before = input.events.len();
+                            input.events.retain(|event| {
+                                !matches!(event, egui::Event::Paste(text)
+                                    if runtime.attachments.attach_long_paste(text))
+                            });
+                            input.events.len() != before
+                        });
+                        if attached {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    let draft = if new_chat {
+                        &mut runtime.home_draft
+                    } else {
+                        &mut runtime.draft
+                    };
+                    if !runtime.busy {
+                        panel_menu::before_editor(ui, editor_id, draft);
+                    }
+                    ui.add_enabled_ui(!runtime.busy, |ui| {
+                        let output = egui::TextEdit::multiline(draft)
+                            .id(editor_id)
+                            .frame(false)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(t("Ask for changes or a task…"))
+                            .show(ui);
+                        panel_menu::remember_editor(ui, draft, &output);
+                    });
                 });
             ui.horizontal(|ui| {
                 let compact = ui.available_width() < 260.0;
@@ -486,13 +591,14 @@ fn composer(
                     } else if ui
                         .add_enabled_ui(
                             !awaiting
-                                && !(if new_chat {
-                                    &runtime.home_draft
-                                } else {
-                                    &runtime.draft
-                                })
-                                .trim()
-                                .is_empty()
+                                && (runtime.attachments.has_files()
+                                    || !(if new_chat {
+                                        &runtime.home_draft
+                                    } else {
+                                        &runtime.draft
+                                    })
+                                    .trim()
+                                    .is_empty())
                                 && !runtime.tools.selected.is_empty(),
                             |ui| arrow_button(ui, true),
                         )
@@ -681,17 +787,55 @@ fn selected_sessions(
     targets: &BTreeMap<u64, session_tools::Target>,
     compact: bool,
 ) {
-    ui.menu_button(if compact { runtime.tools.selected.len().to_string() } else { format!("{} ({})", t("Sessions"), runtime.tools.selected.len()) }, |ui| {
-        ui.set_max_width(360.0);
-        for (&id, target) in targets {
-            let mut selected = runtime.tools.selected.contains(&id);
-            if ui.add_enabled(!runtime.busy && target.connected, egui::Checkbox::new(&mut selected, format!("{} · #{} · {}", target.name, id, target.ssh.as_ref().map_or(target.cwd.as_str(), |ssh| ssh.host.as_str())))).changed() {
-                if selected { runtime.tools.selected.insert(id); } else { runtime.tools.selected.remove(&id); }
+    ui.menu_button(
+        if compact {
+            runtime.tools.selected.len().to_string()
+        } else {
+            format!("{} ({})", t("Sessions"), runtime.tools.selected.len())
+        },
+        |ui| sessions_menu(runtime, ui, targets),
+    )
+    .response
+    .on_hover_text(t("Selected sessions"));
+}
+
+fn sessions_menu(
+    runtime: &mut Runtime,
+    ui: &mut egui::Ui,
+    targets: &BTreeMap<u64, session_tools::Target>,
+) {
+    ui.set_max_width(360.0);
+    for (&id, target) in targets {
+        let mut selected = runtime.tools.selected.contains(&id);
+        if ui
+            .add_enabled(
+                !runtime.busy && target.connected,
+                egui::Checkbox::new(
+                    &mut selected,
+                    format!(
+                        "{} · #{} · {}",
+                        target.name,
+                        id,
+                        target
+                            .ssh
+                            .as_ref()
+                            .map_or(target.cwd.as_str(), |ssh| ssh.host.as_str())
+                    ),
+                ),
+            )
+            .changed()
+        {
+            if selected {
+                runtime.tools.selected.insert(id);
+            } else {
+                runtime.tools.selected.remove(&id);
             }
         }
-        if targets.is_empty() { ui.label(t("Open a terminal session first.")); }
-        ui.label(RichText::new(t("Approved commands run in the visible terminal. Keep it at an empty prompt; Ctrl+C interrupts execution.")).small());
-    }).response.on_hover_text(t("Selected sessions"));
+    }
+    if targets.is_empty() {
+        ui.label(t("Open a terminal session first."));
+    }
+    ui.label(RichText::new(t("Approved commands run in the visible terminal. Keep it at an empty prompt; Ctrl+C interrupts execution.")).small());
 }
 
 fn arrow_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
@@ -852,7 +996,12 @@ fn messages_ui(ui: &mut egui::Ui, runtime: &mut Runtime) {
                         .inner_margin(12)
                         .show(ui, |ui| {
                             ui.set_max_width((ui.available_width() * 0.88).max(80.0));
-                            ui.add(egui::Label::new(&message.text).wrap().selectable(true));
+                            ui.add(
+                                egui::Label::new(&message.text)
+                                    .wrap()
+                                    .selectable(true)
+                                    .sense(egui::Sense::drag()),
+                            );
                         });
                 });
             } else {
@@ -1086,7 +1235,9 @@ fn error(runtime: &Runtime, ui: &mut egui::Ui) {
 }
 
 fn send_new(runtime: &mut Runtime, targets: &BTreeMap<u64, session_tools::Target>) {
-    if runtime.home_draft.trim().is_empty() || runtime.busy || !runtime.deferred_actions.is_empty()
+    if (runtime.home_draft.trim().is_empty() && !runtime.attachments.has_files())
+        || runtime.busy
+        || !runtime.deferred_actions.is_empty()
     {
         return;
     }
@@ -1145,6 +1296,30 @@ fn send(runtime: &mut Runtime, targets: &BTreeMap<u64, session_tools::Target>) {
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn new_chat_from_current_prepares_context_without_reusing_the_thread() {
+        let manifest = serde_json::from_str(include_str!("fixtures/codex.json")).unwrap();
+        let mut runtime = Runtime::new(
+            manifest,
+            PathBuf::new(),
+            true,
+            Path::new("."),
+            String::new(),
+        );
+        runtime.thread_id = Some("previous-thread".into());
+        runtime.message("old-user", "user", "First question", false);
+        runtime.message("old-assistant", "assistant", "Previous answer", false);
+        runtime.tools.token = "old-authority".into();
+        new_from_current(&mut runtime);
+        assert!(runtime.thread_id.is_none());
+        assert!(runtime.tools.token.is_empty());
+        assert!(runtime.messages.is_empty() && !runtime.busy);
+        assert_eq!(runtime.archives[0].1.len(), 2);
+        let (context, _) = runtime.attachments.take_prompt();
+        assert!(context.contains("First question") && context.contains("Previous answer"));
+        assert!(!context.contains("old-authority"));
+    }
 
     #[test]
     fn access_menu_selection_persists_both_modes_without_changing_active_authority() {
@@ -1327,6 +1502,39 @@ mod tests {
         assert_eq!(texts.iter().filter(|s| **s == "command-a").count(), 1);
         assert_eq!(texts.iter().filter(|s| **s == "command-b").count(), 1);
         assert_eq!(duration_text(197_000), "3m 17s");
+    }
+
+    #[test]
+    fn long_draft_leaves_the_conversation_controls_inside_the_panel() {
+        let mut runtime = Runtime::new(
+            serde_json::from_str(include_str!("fixtures/codex.json")).unwrap(),
+            PathBuf::new(),
+            true,
+            Path::new("."),
+            String::new(),
+        );
+        runtime.draft = "A long multiline draft\n".repeat(3_000);
+        let ctx = egui::Context::default();
+        let mut remaining_height = 0.0;
+        for _ in 0..3 {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 420.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let bottom = ui.max_rect().bottom();
+                        conversation(&mut runtime, ui, &BTreeMap::new(), None);
+                        remaining_height = bottom - ui.cursor().min.y;
+                    });
+                },
+            );
+        }
+        assert!(remaining_height >= -1.0, "{remaining_height}");
     }
 
     #[test]
@@ -1516,8 +1724,9 @@ mod tests {
                         );
                         assert!(
                             ui.min_rect().bottom() <= 650.0,
-                            "Chat controls overflow the panel: {:?}",
-                            ui.min_rect()
+                            "Chat controls overflow the {:?} panel: {:?}",
+                            runtime.chat_page,
+                            ui.min_rect(),
                         );
                     });
                 },

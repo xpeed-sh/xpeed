@@ -2,10 +2,198 @@ use super::*;
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect};
 
 #[test]
+#[ignore = "local UI performance benchmark"]
+fn measure_workspace_rendering() {
+    fn sample(label: &str, mut draw: impl FnMut(&egui::Context, &mut egui::Ui)) {
+        let ctx = egui::Context::default();
+        let mut samples = Vec::new();
+        for frame in 0..60 {
+            let start = Instant::now();
+            let output = ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| draw(ctx, ui));
+                },
+            );
+            let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+            if frame >= 10 {
+                samples.push(start.elapsed().as_secs_f64() * 1_000.0);
+            }
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "{label}: p50 {:.2} ms, p95 {:.2} ms",
+            samples[25], samples[47]
+        );
+    }
+
+    let mut terminals: Vec<_> = (0..4)
+        .map(|index| {
+            let mut session = Session::screenshot_preview(SshConfig::default()).unwrap();
+            session.id = index;
+            for line in 0..500 {
+                session.append_notice(&format!("Server log entry {line}"));
+            }
+            session
+        })
+        .collect();
+    sample("4 terminal panes, 500 log entries each", |_, ui| {
+        ui.columns(terminals.len(), |columns| {
+            for (ui, session) in columns.iter_mut().zip(&mut terminals) {
+                terminal_view(ui, session, 14.0, Palette::default(), false, false, "");
+            }
+        });
+    });
+
+    let mut remote = RemoteExplorer::preview();
+    remote.entries = (0..5_000)
+        .map(|index| crate::sftp::Entry {
+            name: format!("service-log-{index}.txt"),
+            directory: false,
+            bytes: index * 147,
+        })
+        .collect();
+    sample("SFTP listing with 5,000 files", |_, ui| {
+        crate::file_explorer::show(ui, &mut remote, "Benchmark server", 1, Palette::default());
+    });
+    let mut extensions = crate::extensions::Extensions::new(std::path::Path::new("."), true);
+    let chat = extensions.performance_chat(120);
+    sample("Codex chat with 120 turns", |_, ui| {
+        extensions.view_ui(ui, chat)
+    });
+}
+
+#[test]
 fn recent_connections_switch_from_grid_to_list_as_home_panel_narrows() {
     assert_eq!(recent_connection_columns(900.0), 3);
     assert_eq!(recent_connection_columns(500.0), 2);
     assert_eq!(recent_connection_columns(320.0), 1);
+}
+
+#[test]
+fn saved_workspace_restores_splits_without_closing_other_terminals() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    for id in 1..=3 {
+        let config = SshConfig {
+            host: format!("server-{id}"),
+            ..Default::default()
+        };
+        let mut session = Session::screenshot_preview(config.clone()).unwrap();
+        session.id = id;
+        app.sessions.insert(id, session);
+        app.sources.insert(
+            id,
+            Connection {
+                name: format!("Server {id}"),
+                target: Target::Ssh(config),
+            },
+        );
+    }
+    app.next_id = 4;
+    let mut tree = workspace::default_layout(&[1], false);
+    workspace::detach_sidebar(&mut tree);
+    workspace::add_terminal(&mut tree, 2, Some(1), Some(ContainerKind::Horizontal));
+    let saved = SavedWorkspace {
+        snapshot: Snapshot {
+            layout_version: 3,
+            tree,
+            sources: app
+                .sources
+                .iter()
+                .filter(|(id, _)| **id != 3)
+                .map(|(&id, source)| (id, source.clone()))
+                .collect(),
+            sidebar_tree: Some(app.sidebar_tree.clone()),
+        },
+        focused: Some(2),
+        sidebar_visible: false,
+        sidebar_width: 325.0,
+    };
+    let bytes = serde_json::to_vec(&saved).unwrap();
+    let restored: SavedWorkspace = serde_json::from_slice(&bytes).unwrap();
+    assert!(restored.snapshot.validate());
+    app.saved_workspaces.insert("Incident".into(), restored);
+    let previous: Vec<_> = app
+        .sessions
+        .values()
+        .map(|session| session.term.clone())
+        .collect();
+    app.action(Action::OpenWorkspace("Incident".into()), &ctx);
+    assert_eq!(app.focused, Some(2));
+    assert!(!app.settings.sidebar);
+    for (id, buffer) in (1..=3).zip(previous) {
+        assert!(std::sync::Arc::ptr_eq(&buffer, &app.sessions[&id].term));
+        assert!(workspace::find(&app.tree, Pane::Terminal(id)).is_some());
+    }
+    let first = workspace::find(&app.tree, Pane::Terminal(1)).unwrap();
+    let second = workspace::find(&app.tree, Pane::Terminal(2)).unwrap();
+    assert_ne!(
+        app.tree.tiles.parent_of(first),
+        app.tree.tiles.parent_of(second)
+    );
+}
+
+#[test]
+fn terminal_search_groups_scrollback_by_session_and_reveals_a_match() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    for id in 1..=3 {
+        let mut session = Session::screenshot_preview(SshConfig::default()).unwrap();
+        session.id = id;
+        if id < 3 {
+            session.append_notice(&format!("Build result {id}: Málaga"));
+        }
+        for line in 0..40 {
+            session.append_notice(&format!("Output line {line}"));
+        }
+        app.sessions.insert(id, session);
+    }
+    app.search = "MÁLAGA".into();
+    app.action(Action::SearchAll, &ctx);
+    assert_eq!(
+        app.search_matches
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    let (id, hit) = &app.search_matches[1];
+    let session = app.sessions.get_mut(id).unwrap();
+    assert!(session.reveal_match(&app.search, hit));
+    assert!(output(session).contains("Build result 2: Málaga"));
+}
+
+#[test]
+fn favorite_commands_roundtrip_and_insert_without_sending_enter() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    let mut session = Session::screenshot_preview(SshConfig::default()).unwrap();
+    session.id = 1;
+    let input = session.capture_input();
+    app.sessions.insert(1, session);
+    workspace::add_terminal(&mut app.tree, 1, None, None);
+    let mut history: History = serde_json::from_str(r#"{"commands":{}}"#).unwrap();
+    assert!(history.favorites.is_empty());
+    history.favorites.push(Favorite {
+        name: "Find errors".into(),
+        description: "Recent errors".into(),
+        text: "echo error\n".into(),
+        scope: Some(Target::Ssh(SshConfig {
+            host: "server".into(),
+            ..Default::default()
+        })),
+    });
+    let restored: History = serde_json::from_slice(&serde_json::to_vec(&history).unwrap()).unwrap();
+    let favorite = &restored.favorites[0];
+    assert!(matches!(&favorite.scope, Some(Target::Ssh(config)) if config.host == "server"));
+    assert_eq!(favorite.description, "Recent errors");
+    app.action(Action::InsertCommand(1, favorite.text.clone()), &ctx);
+    assert_eq!(input.try_recv().unwrap(), b"echo error ");
+    assert!(input.try_recv().is_err());
 }
 
 #[test]
@@ -970,6 +1158,38 @@ fn tab_hover_keeps_normal_cursor_and_free_bar_keeps_drag_cursor() {
         );
         assert_eq!(output.platform_output.cursor_icon, expected);
     }
+}
+
+#[test]
+fn automatic_reconnect_moves_on_when_a_retry_never_authenticates() {
+    let ctx = egui::Context::default();
+    let mut app = Xpeed::from_context(&ctx, true);
+    app.action(Action::Local(Profile::default_shell()), &ctx);
+    isolate_test_shells(&mut app, &ctx);
+    let id = app.focused.unwrap();
+    app.ephemeral = false;
+    app.settings.auto_reconnect = true;
+    let session = app.sessions.get_mut(&id).unwrap();
+    session.auth_complete = false;
+    session.started = Instant::now() - Duration::from_secs(40);
+    let previous_terminal = session.term.clone();
+    app.reconnects.insert(id, (1, Instant::now()));
+    app.reconnect_sessions(&ctx);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let session = app.sessions.get_mut(&id).unwrap();
+    while !session.exited && Instant::now() < deadline {
+        session.poll();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(session.exited, "the stalled process did not exit");
+    app.reconnect_sessions(&ctx);
+    assert_eq!(app.reconnects[&id].0, 2);
+    assert!(std::sync::Arc::ptr_eq(
+        &app.sessions[&id].term,
+        &previous_terminal
+    ));
+    app.ephemeral = true;
 }
 
 #[test]

@@ -250,18 +250,21 @@ impl Updates {
             }
         }
         if let Some(download) = &mut self.download {
-            while let Ok(event) = download.receiver.try_recv() {
-                match event {
-                    DownloadEvent::Progress(received, total) => {
-                        download.received = received;
-                        download.total = total;
+            while download.ready.is_none() && download.error.is_none() {
+                match download.receiver.try_recv() {
+                    Ok(DownloadEvent::Progress(received, total)) => {
+                        (download.received, download.total) = (received, total);
                     }
-                    DownloadEvent::Ready(path) => download.ready = Some(path),
-                    DownloadEvent::Error(error) => download.error = Some(error),
+                    Ok(DownloadEvent::Ready(path)) => download.ready = Some(path),
+                    Ok(DownloadEvent::Error(error)) => download.error = Some(error),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        download.error = Some("The update download was interrupted.".into());
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        ctx.request_repaint_after(Duration::from_millis(100));
+                        break;
+                    }
                 }
-            }
-            if download.ready.is_none() && download.error.is_none() {
-                ctx.request_repaint_after(Duration::from_millis(100));
             }
         }
     }
@@ -337,19 +340,26 @@ impl Updates {
             }
             None => {}
         }
-        if let Some(download) = &self.download {
+        let installer = release.and_then(|release| release.installer);
+        if let Some(download) = &mut self.download {
             if let Some(error) = &download.error {
                 ui.colored_label(ui.visuals().error_fg_color, t(error));
-            } else if let Some(path) = &download.ready {
+            }
+            if let Some(path) = &download.ready {
                 ui.label(t("The update is downloaded and verified."));
                 if ui.button(t("Install update")).clicked() {
                     match std::process::Command::new(path).arg("/SP-").spawn() {
                         Ok(_) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
                         Err(_) => {
-                            self.download.as_mut().unwrap().error =
-                                Some("Unable to start the installer.".into());
+                            download.error = Some("Unable to start the installer.".into());
                         }
                     }
+                }
+            } else if download.error.is_some() {
+                if let Some(installer) = installer
+                    && ui.button(t("Retry download")).clicked()
+                {
+                    self.start_download(installer, ui.ctx());
                 }
             } else {
                 let fraction = if download.total == 0 {
@@ -363,15 +373,16 @@ impl Updates {
                         .text(t("Downloading and verifying update…")),
                 );
             }
-        } else if cfg!(all(target_os = "windows", target_arch = "x86_64"))
-            && let Some(installer) = release.and_then(|release| release.installer)
-            && ui.button(t("Download update")).clicked()
-        {
-            self.start_download(installer, ui.ctx());
-        } else if self.available() && cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            ui.label(t(
-                "This release has no verified Windows installer attached.",
-            ));
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            if let Some(installer) = installer {
+                if ui.button(t("Download update")).clicked() {
+                    self.start_download(installer, ui.ctx());
+                }
+            } else if self.available() {
+                ui.label(t(
+                    "This release has no verified Windows installer attached.",
+                ));
+            }
         }
         ui.hyperlink_to(t("View releases on GitHub"), RELEASES);
         ui.add(
@@ -388,6 +399,32 @@ mod tests {
     fn compares_numbers_and_never_offers_a_downgrade() {
         assert!(version("0.10.10") > version("0.10.9"));
         assert!(version("v0.10.9-preview").is_none());
+    }
+
+    #[test]
+    fn interrupted_worker_leaves_download_in_a_retryable_state() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(DownloadEvent::Progress(12, 100)).unwrap();
+        drop(sender);
+        let mut updates = Updates {
+            auto_started: true,
+            download: Some(Download {
+                receiver,
+                received: 0,
+                total: 100,
+                ready: None,
+                error: None,
+            }),
+            ..Default::default()
+        };
+        updates.poll(&egui::Context::default());
+        let download = updates.download.unwrap();
+        assert_eq!(download.received, 12);
+        assert!(download.ready.is_none());
+        assert_eq!(
+            download.error.as_deref(),
+            Some("The update download was interrupted.")
+        );
     }
 
     #[test]

@@ -71,7 +71,7 @@ pub fn smoke_test(
     password: Secret,
     hosts: std::path::PathBuf,
 ) -> Result<(), String> {
-    let worker = Worker::start(
+    let mut worker = Worker::start(
         config,
         Some(password),
         egui::Context::default(),
@@ -89,7 +89,11 @@ pub fn smoke_test(
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    drop(worker);
+    // Wait for the test's SSH child to exit before ending the host process.
+    worker.cancel.store(true, Ordering::Release);
+    if let Some(thread) = worker.thread.take() {
+        thread.join().map_err(|_| "Monitor worker panicked")?;
+    }
     if count == 3 {
         Ok(())
     } else {

@@ -8,9 +8,19 @@ pub struct Command {
     pub time: u64,
     pub text: String,
 }
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Favorite {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub text: String,
+    pub scope: Option<crate::connections::Target>,
+}
 #[derive(Default, Serialize, Deserialize)]
 pub struct History {
     pub commands: BTreeMap<String, Vec<Command>>,
+    #[serde(default)]
+    pub favorites: Vec<Favorite>,
 }
 impl History {
     fn path() -> Option<std::path::PathBuf> {

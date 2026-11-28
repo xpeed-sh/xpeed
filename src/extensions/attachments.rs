@@ -6,6 +6,9 @@ use std::{
 };
 use xpeed_i18n::t;
 
+const INLINE_PASTE_LINES: usize = 80;
+const INLINE_PASTE_CHARS: usize = 4_000;
+
 #[derive(Default)]
 pub(super) struct State {
     open: bool,
@@ -20,10 +23,7 @@ enum Loaded {
     Attachment(String, String),
 }
 impl State {
-    pub fn reserved_height(&self) -> f32 {
-        self.files.len() as f32 * 24.0
-    }
-    fn accept(&mut self, name: String, content: String) {
+    pub(super) fn accept(&mut self, name: String, content: String) {
         let bytes: usize = self
             .files
             .iter()
@@ -35,7 +35,21 @@ impl State {
         } else {
             self.files.push((name, content));
             self.open = false;
+            self.error = None;
         }
+    }
+    pub fn attach_long_paste(&mut self, text: &str) -> bool {
+        if text.lines().nth(INLINE_PASTE_LINES).is_none()
+            && text.chars().nth(INLINE_PASTE_CHARS).is_none()
+        {
+            return false;
+        }
+        self.accept(t("Pasted text.txt").into(), text.into());
+        true
+    }
+
+    pub fn has_files(&self) -> bool {
+        !self.files.is_empty()
     }
     pub fn open(&mut self) {
         self.open = true;
@@ -139,6 +153,17 @@ impl State {
             self.files.remove(i);
         }
         if !self.open {
+            if let Some(error) = &self.error {
+                let dismissed = ui
+                    .horizontal_wrapped(|ui| {
+                        ui.colored_label(ui.visuals().error_fg_color, error);
+                        ui.small_button(t("Dismiss")).clicked()
+                    })
+                    .inner;
+                if dismissed {
+                    self.error = None;
+                }
+            }
             return;
         }
         let mut navigate = None;
@@ -316,6 +341,35 @@ fn read_attachment(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn long_paste_keeps_every_line_in_a_temporary_attachment() {
+        let mut state = State::default();
+        assert!(!state.attach_long_paste(&"Corta\r\n".repeat(80)));
+        let boundary = "á\r\n".repeat(81);
+        assert!(state.attach_long_paste(&boundary));
+        let long = "Contenido Unicode ñ 漢\r\n".repeat(5_000);
+        assert!(state.attach_long_paste(&long));
+        assert_eq!(state.files[0].1, boundary);
+        assert_eq!(state.files[1].1, long);
+        let (prompt, _) = state.take_prompt();
+        assert!(prompt.ends_with(&long));
+        assert!(!state.has_files());
+        let oversized = "x\n".repeat(550_000);
+        assert!(state.attach_long_paste(&oversized));
+        assert!(!state.has_files());
+        assert!(state.error.is_some());
+    }
+
+    #[test]
+    fn single_line_paste_uses_a_character_limit_without_splitting_unicode() {
+        let mut state = State::default();
+        let limit = "漢".repeat(INLINE_PASTE_CHARS);
+        assert!(!state.attach_long_paste(&limit));
+        let long = format!("{limit}á");
+        assert!(state.attach_long_paste(&long));
+        let (prompt, _) = state.take_prompt();
+        assert!(prompt.ends_with(&long));
+    }
     #[test]
     fn attachments_include_contents_and_skip_binary_and_build_files() {
         let root =
